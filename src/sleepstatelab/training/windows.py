@@ -444,6 +444,12 @@ class SegmentDataset(Dataset):
     def participants(self) -> tuple[str, ...]:
         return self.windows.participants
 
+    @property
+    def stats(self) -> NormalizationStats:
+        """The normalisation the underlying epochs were scaled by, so a
+        checkpoint records the statistics this dataset actually applied."""
+        return self.windows.stats
+
     def class_counts(self) -> np.ndarray:
         return self.windows.class_counts()
 

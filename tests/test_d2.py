@@ -409,3 +409,64 @@ def test_segment_dataset_reports_the_same_class_counts(windows):
         window_train.class_weights("inverse_frequency"),
         segment_train.class_weights("inverse_frequency"),
     )
+
+
+def test_forward_accepts_both_dataset_layouts():
+    """The training loop calls `model(*inputs)`; both datasets must fit that."""
+    torch.manual_seed(0)
+    model = D2Classifier(in_channels=2, context=5, embedding_dim=32).eval()
+    windows = model(torch.randn(2, 5, 2, 3000), torch.ones(2, 5, dtype=torch.bool))
+    assert windows.shape == (2, len(STAGES))
+
+    gather = (
+        torch.stack([torch.arange(c, c + 5) for c in range(4)])
+        .unsqueeze(0)
+        .expand(2, -1, -1)
+        .contiguous()
+    )
+    segments = model(
+        torch.randn(2, 10, 2, 3000), gather, torch.ones(2, 4, 5, dtype=torch.bool)
+    )
+    assert segments.shape == (2, 4, len(STAGES))
+
+
+@pytest.mark.slow
+def test_d2_trains_through_the_segment_path(windows, tmp_path):
+    """One pass of real training on segments, end to end.
+
+    The gap this closes: every earlier segment test went through `predict` or
+    `forward_segment` directly, so the training loop's own call into the model
+    was never exercised -- and it was broken.
+    """
+    from sleepstatelab.training.checkpoint import load_checkpoint
+    from sleepstatelab.training.trainer import train_d2
+
+    config, split = windows
+    train, val, _, _ = build_window_datasets(
+        config, split, context=11, segments=True, centres_per_segment=8
+    )
+    _, checkpoint, history = train_d2(
+        config,
+        split,
+        train,
+        val,
+        device="cpu",
+        checkpoint_path=tmp_path / "d2seg.pt",
+        run_id="segment-unit",
+        progress=False,
+        loader_batch_size=2,
+    )
+    assert history.rows
+    assert checkpoint.model_name == "D2"
+    assert checkpoint.temporal_kwargs["context"] == 11
+    # The configuration keeps counting examples; the loader's own batch is
+    # recorded separately so the checkpoint does not misdescribe itself.
+    assert checkpoint.notes["loader_batch_size"] == 2
+    assert checkpoint.notes["examples_per_step"] == config.train.batch_size
+
+    model, _ = load_checkpoint(
+        tmp_path / "d2seg.pt",
+        expect_channels=tuple(config.data.channels),
+        expect_preprocessing_id=config.preprocessing_identity,
+    )
+    assert model.context == 11

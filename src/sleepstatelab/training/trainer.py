@@ -254,6 +254,7 @@ def train_d2(
     checkpoint_path: Path | str | None = None,
     run_id: str = "d2",
     progress: bool = True,
+    loader_batch_size: int | None = None,
 ) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
     """Train D2 under settings identical to D1's, which is the whole point."""
     return train_supervised(
@@ -268,6 +269,7 @@ def train_d2(
         checkpoint_path=checkpoint_path,
         run_id=run_id,
         progress=progress,
+        loader_batch_size=loader_batch_size,
     )
 
 
@@ -284,8 +286,14 @@ def train_supervised(
     checkpoint_path: Path | str | None = None,
     run_id: str = "run",
     progress: bool = True,
+    loader_batch_size: int | None = None,
 ) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
     """The supervised loop, shared by every model this repository trains.
+
+    ``loader_batch_size`` is how many *dataset items* make a step, which differs
+    from ``config.train.batch_size`` only when an item holds more than one
+    example -- a segment of centres. The configuration keeps counting examples,
+    so a checkpoint keeps saying what it means.
 
     Shared deliberately. If D1 and D2 had a loop each, the two would drift --
     a different schedule here, a different clipping threshold there -- and the
@@ -308,7 +316,7 @@ def train_supervised(
     )
     loader = DataLoader(
         train,
-        batch_size=config.train.batch_size,
+        batch_size=loader_batch_size or config.train.batch_size,
         shuffle=True,
         num_workers=config.train.num_workers,
         drop_last=False,
@@ -412,8 +420,13 @@ def train_supervised(
             "context_coverage": (
                 train.context_coverage() if hasattr(train, "context_coverage") else None
             ),
-            "train_epochs_available": len(train),
+            "train_examples_available": (
+                train.n_centres() if hasattr(train, "n_centres") else len(train)
+            ),
+            "train_items_available": len(train),
             "truncated_batches_per_epoch": config.train.max_train_batches or None,
+            "loader_batch_size": loader_batch_size or config.train.batch_size,
+            "examples_per_step": config.train.batch_size,
         },
     )
     if checkpoint_path is not None:

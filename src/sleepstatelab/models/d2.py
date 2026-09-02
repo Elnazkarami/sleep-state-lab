@@ -128,10 +128,30 @@ class D2Classifier(nn.Module):
         embedded = self.encoder(flat).embedding
         return embedded.reshape(batch, context, -1)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """Five logits for the central epoch of each window."""
-        embedded = self.embed_window(x)
-        return self.classify(embedded, mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        second: torch.Tensor,
+        third: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Logits, from either layout the datasets produce.
+
+        ``forward(windows, mask)`` -- ``[batch, context, channels, samples]``
+        with a ``[batch, context]`` mask -- gives ``[batch, classes]``, one
+        prediction per window.
+
+        ``forward(signals, gather, mask)`` -- a contiguous stretch of a
+        recording, the indices that cut windows out of it, and their mask --
+        gives ``[batch, centres, classes]``. Same model, shared encodings.
+
+        One entry point rather than two because the training loop and the
+        prediction loop both call ``model(*inputs)``, and a model that had to be
+        called differently depending on its dataset is a model that will one day
+        be called the wrong way.
+        """
+        if third is None:
+            return self.classify(self.embed_window(x), second)
+        return self.forward_segment(x, second, third)
 
     def classify(self, embedded: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """The temporal half, given epoch embeddings already computed.
