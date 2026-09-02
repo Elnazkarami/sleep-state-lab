@@ -1,0 +1,32 @@
+# The six-participant pilot the first release was executed on. Small enough to
+# run on a laptop CPU in minutes, and far too small to benchmark anything: with
+# one held-out participant, the test estimate is one person's night.
+#
+# Pass --data-root and --cache-dir on the command line so this file carries no
+# machine-specific paths.
+name: pilot-6
+
+data:
+  root: data/sleep-edf
+  cache_dir: cache/epochs
+  channels: ["EEG Fpz-Cz", "EEG Pz-Oz"]
+  sampling_rate_hz: 100.0
+  epoch_seconds: 30.0
+  nights: [1, 2]
+
+preprocess:
+  normalization: train_robust_channel
+  sleep_window: false
+
+split:
+  seed: 20260901
+  train_fraction: 0.6
+  val_fraction: 0.2
+
+train:
+  device: cpu
+  seed: 0
+  epochs: 20
+  batch_size: 64
+  learning_rate: 0.001
+  early_stopping_patience: 5

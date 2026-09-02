@@ -1,0 +1,19 @@
+# The sensitivity analysis, kept as a separate file so a run under it cannot be
+# confused with the primary preparation.
+#
+# Cropping to the annotated sleep interval plus a 30-minute margin removes most
+# of the pre-bed and post-rise wake. That changes wake from roughly 70% of the
+# epochs to roughly 30%, which changes what every metric means -- accuracy most
+# of all. Results produced with this file are labelled "sleep-window" wherever
+# they appear and are never compared directly against primary results.
+name: sleep-window-sensitivity
+
+data:
+  root: data/sleep-edf
+  cache_dir: cache/epochs
+  channels: ["EEG Fpz-Cz", "EEG Pz-Oz"]
+
+preprocess:
+  normalization: train_robust_channel
+  sleep_window: true
+  sleep_window_margin_minutes: 30.0

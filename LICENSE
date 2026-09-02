@@ -1,0 +1,51 @@
+SleepStateLab - Proprietary License
+Copyright (c) 2026 Elnaz Alikarami. All rights reserved.
+
+Elnaz Alikarami is the sole author and designer of SleepStateLab - its concept,
+architecture, design, and implementation.
+
+    Author:  Elnaz Alikarami
+    GitHub:  @Elnazkarami  (https://github.com/Elnazkarami)
+    Email:   elnaz.karami@gmail.com
+
+TERMS
+
+The contents of this repository authored by Elnaz Alikarami - including but not
+limited to source code, notebooks, configuration, documentation, and design
+assets - are her exclusive property and are protected by copyright.
+
+Use of this work for ANY purpose requires the direct, prior, written approval of
+the author. Without such approval, no person or organization is granted any
+right to use, copy, modify, merge, publish, distribute, sublicense, reproduce,
+or create derivative works from any part of it, in whole or in part, by any
+means or in any form.
+
+Unauthorized use is strictly prohibited.
+
+RELATIONSHIP TO PhysioML
+
+Parts of this repository are derived from PhysioML, a separate repository by the
+same author, under the same proprietary terms. Every derived component names its
+origin and the PhysioML revision it was taken from; see docs/physioml_reuse.md.
+PhysioML is not vendored, imported, or modified by this project.
+
+THIRD-PARTY DATA
+
+This repository contains no dataset. It reads one public research dataset that
+carries its own terms, and those terms govern the data, not this licence:
+
+  Sleep-EDF Database Expanded, Kemp et al., PhysioNet.
+  Open Data Commons Attribution License v1.0.
+  https://physionet.org/content/sleep-edfx/1.0.0/
+
+The dataset is not redistributed here.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Not for clinical use.
+
+For permissions and inquiries, contact: elnaz.karami@gmail.com

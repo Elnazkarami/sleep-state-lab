@@ -1,0 +1,59 @@
+# The defaults, written out. Every field the package reads appears here, so a
+# run's settings can be read off one page rather than reconstructed from the
+# dataclass defaults. `sleepstatelab` refuses an unknown key, so this file is
+# also a check that the documentation and the code agree.
+name: default
+
+data:
+  root: data/sleep-edf            # searched recursively for SC4*-PSG.edf
+  cache_dir: cache/epochs         # one subdirectory per preprocessing identity
+  channels: ["EEG Fpz-Cz", "EEG Pz-Oz"]   # order is part of the model contract
+  sampling_rate_hz: 100.0
+  epoch_seconds: 30.0
+  require_exact_rate: true
+  participants: []                # empty means every participant discovered
+  nights: [1, 2]
+  checksums: ""                   # optional path to PhysioNet SHA256SUMS.txt
+
+preprocess:
+  highpass_hz: 0.3
+  lowpass_hz: 35.0
+  filter_order: 4
+  normalization: train_robust_channel   # fitted on training participants only
+  clip_sigma: 20.0
+  qc_flat_sd_uv: 0.1
+  qc_max_amplitude_uv: 500.0
+  qc_clip_fraction: 0.02
+  qc_reject: ["qc_flatline", "qc_clipped", "qc_high_amplitude"]
+  sleep_window: false             # primary preparation keeps every scored epoch
+  sleep_window_margin_minutes: 30.0
+
+split:
+  seed: 20260901
+  train_fraction: 0.6
+  val_fraction: 0.2
+  strategy: grouped_random
+  label_budgets: [0.1, 0.25, 1.0]
+
+model:
+  stem_channels: 32
+  stem_kernel: 49
+  stem_stride: 6
+  block_channels: [64, 96, 128]
+  block_kernel: 9
+  embedding_dim: 128
+  dropout: 0.3
+  n_classes: 5
+
+train:
+  device: cpu
+  seed: 0
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  class_weighting: inverse_frequency
+  early_stopping_patience: 6
+  grad_clip: 5.0
+  num_workers: 0
+  max_train_batches: 0            # 0 means the whole training set

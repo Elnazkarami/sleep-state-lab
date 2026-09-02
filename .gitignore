@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+.DS_Store
+.coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# build artifacts
+*.egg-info/
+build/
+dist/
+
+# recordings, caches, checkpoints, run outputs: never in the repository
+data/
+*.edf
+*.fif
+*.npz
+*.npy
+*.pt
+*.ckpt
+cache/
+runs/
+outputs/
+
+# docs/ is committed, including the generated audit figure and the generated
+# result tables: they are the evidence the README points at, and they are small.

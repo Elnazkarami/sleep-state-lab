@@ -1,0 +1,385 @@
+{
+  "version": "1.0",
+  "root": "<data root>",
+  "channels": [
+    "EEG Fpz-Cz",
+    "EEG Pz-Oz"
+  ],
+  "epoch_seconds": 30.0,
+  "expected_rate_hz": 100.0,
+  "entries": [
+    {
+      "participant_id": "SC400",
+      "recording_id": "SC400-n1",
+      "night": 1,
+      "psg_file": "SC4001E0-PSG.edf",
+      "hypnogram_file": "SC4001EC-Hypnogram.edf",
+      "psg_sha256": "2b40a18adf76af69a42d6db1f30f31d26b369f6d27ca0050ef30147ef892b131",
+      "hypnogram_sha256": "a4cf67694ade1b52a0ddd06d5817fd45d2d3e8bac5302f640f3e9cfbbf12a996",
+      "published_checksum_match": "match",
+      "psg_start": "1989-04-24T16:13:00",
+      "hypnogram_start": "1989-04-24T16:13:00",
+      "psg_duration_seconds": 79500.0,
+      "hypnogram_covered_seconds": 86400.0,
+      "n_epochs_signal": 2650,
+      "n_epochs_annotated": 2880,
+      "n_epochs_labelled": 2650,
+      "n_epochs_beyond_signal": 230,
+      "annotation_coverage": 1.0,
+      "channels": [
+        {
+          "label": "EEG Fpz-Cz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -192.0,
+          "physical_max": 192.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        },
+        {
+          "label": "EEG Pz-Oz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -197.0,
+          "physical_max": 196.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        }
+      ],
+      "stage_counts": {
+        "Wake": 1997,
+        "N1": 58,
+        "N2": 250,
+        "N3": 220,
+        "REM": 125
+      },
+      "exclusions": {
+        "movement_time": 0,
+        "unscored": 230,
+        "unknown_annotation": 0,
+        "no_annotation": 0
+      },
+      "misaligned_annotations": [],
+      "overlapping_epochs": 0,
+      "problems": []
+    },
+    {
+      "participant_id": "SC401",
+      "recording_id": "SC401-n1",
+      "night": 1,
+      "psg_file": "SC4011E0-PSG.edf",
+      "hypnogram_file": "SC4011EH-Hypnogram.edf",
+      "psg_sha256": "9e4c34f3f631275990fd7a2d61a24e998c7b03eb9b37ebe5cd7c8323d8310a15",
+      "hypnogram_sha256": "5bbf7b4ed8a95c8d20e4347b08c2ded2ee21e2dac4680dedf629795adc2edc83",
+      "published_checksum_match": "match",
+      "psg_start": "1989-03-29T16:49:00",
+      "hypnogram_start": "1989-03-29T16:49:00",
+      "psg_duration_seconds": 84060.0,
+      "hypnogram_covered_seconds": 86400.0,
+      "n_epochs_signal": 2802,
+      "n_epochs_annotated": 2880,
+      "n_epochs_labelled": 2802,
+      "n_epochs_beyond_signal": 78,
+      "annotation_coverage": 1.0,
+      "channels": [
+        {
+          "label": "EEG Fpz-Cz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -204.0,
+          "physical_max": 204.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        },
+        {
+          "label": "EEG Pz-Oz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -185.0,
+          "physical_max": 185.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        }
+      ],
+      "stage_counts": {
+        "Wake": 1856,
+        "N1": 109,
+        "N2": 562,
+        "N3": 105,
+        "REM": 170
+      },
+      "exclusions": {
+        "movement_time": 0,
+        "unscored": 78,
+        "unknown_annotation": 0,
+        "no_annotation": 0
+      },
+      "misaligned_annotations": [],
+      "overlapping_epochs": 0,
+      "problems": []
+    },
+    {
+      "participant_id": "SC402",
+      "recording_id": "SC402-n1",
+      "night": 1,
+      "psg_file": "SC4021E0-PSG.edf",
+      "hypnogram_file": "SC4021EH-Hypnogram.edf",
+      "psg_sha256": "810adaedf42621e389ca767274045fbafb123bbc5d99bc15ce2c5bacb52e378c",
+      "hypnogram_sha256": "62b49b26bf08941cb0e974cfeeb0a820bf7dd43fb0c66dd89b4c3a6c0ee45dd8",
+      "published_checksum_match": "match",
+      "psg_start": "1989-04-05T16:48:00",
+      "hypnogram_start": "1989-04-05T16:48:00",
+      "psg_duration_seconds": 84120.0,
+      "hypnogram_covered_seconds": 86400.0,
+      "n_epochs_signal": 2804,
+      "n_epochs_annotated": 2880,
+      "n_epochs_labelled": 2804,
+      "n_epochs_beyond_signal": 76,
+      "annotation_coverage": 1.0,
+      "channels": [
+        {
+          "label": "EEG Fpz-Cz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -189.0,
+          "physical_max": 189.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        },
+        {
+          "label": "EEG Pz-Oz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -212.0,
+          "physical_max": 212.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        }
+      ],
+      "stage_counts": {
+        "Wake": 1907,
+        "N1": 94,
+        "N2": 545,
+        "N3": 95,
+        "REM": 163
+      },
+      "exclusions": {
+        "movement_time": 0,
+        "unscored": 76,
+        "unknown_annotation": 0,
+        "no_annotation": 0
+      },
+      "misaligned_annotations": [],
+      "overlapping_epochs": 0,
+      "problems": []
+    },
+    {
+      "participant_id": "SC403",
+      "recording_id": "SC403-n1",
+      "night": 1,
+      "psg_file": "SC4031E0-PSG.edf",
+      "hypnogram_file": "SC4031EC-Hypnogram.edf",
+      "psg_sha256": "ce2314a60dd6e1437f9cd720c2e59c23aabe471e4821f9544593109a9b0715dd",
+      "hypnogram_sha256": "7ec3d3c8d8f1a89d48df4cc85be374fbdf70d4b5ec5ec321c03d586dd2cc1617",
+      "published_checksum_match": "match",
+      "psg_start": "1989-04-10T16:50:00",
+      "hypnogram_start": "1989-04-10T16:50:00",
+      "psg_duration_seconds": 84600.0,
+      "hypnogram_covered_seconds": 86400.0,
+      "n_epochs_signal": 2820,
+      "n_epochs_annotated": 2880,
+      "n_epochs_labelled": 2820,
+      "n_epochs_beyond_signal": 60,
+      "annotation_coverage": 1.0,
+      "channels": [
+        {
+          "label": "EEG Fpz-Cz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -197.0,
+          "physical_max": 199.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        },
+        {
+          "label": "EEG Pz-Oz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -194.0,
+          "physical_max": 196.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        }
+      ],
+      "stage_counts": {
+        "Wake": 2008,
+        "N1": 61,
+        "N2": 485,
+        "N3": 57,
+        "REM": 209
+      },
+      "exclusions": {
+        "movement_time": 0,
+        "unscored": 60,
+        "unknown_annotation": 0,
+        "no_annotation": 0
+      },
+      "misaligned_annotations": [],
+      "overlapping_epochs": 0,
+      "problems": []
+    },
+    {
+      "participant_id": "SC404",
+      "recording_id": "SC404-n1",
+      "night": 1,
+      "psg_file": "SC4041E0-PSG.edf",
+      "hypnogram_file": "SC4041EC-Hypnogram.edf",
+      "psg_sha256": "28ae3a51cca93bb1502a2c613b4a84758d09feee042b925a09a7cdce0c1bf4f5",
+      "hypnogram_sha256": "da33d90216e031a6b04c9ebaddcdf7abc223f1e61fd5899093815c7aea65e39a",
+      "published_checksum_match": "match",
+      "psg_start": "1989-04-24T16:50:00",
+      "hypnogram_start": "1989-04-24T16:50:00",
+      "psg_duration_seconds": 77100.0,
+      "hypnogram_covered_seconds": 86400.0,
+      "n_epochs_signal": 2570,
+      "n_epochs_annotated": 2880,
+      "n_epochs_labelled": 2569,
+      "n_epochs_beyond_signal": 310,
+      "annotation_coverage": 1.0,
+      "channels": [
+        {
+          "label": "EEG Fpz-Cz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -193.0,
+          "physical_max": 193.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        },
+        {
+          "label": "EEG Pz-Oz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -197.0,
+          "physical_max": 198.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        }
+      ],
+      "stage_counts": {
+        "Wake": 1534,
+        "N1": 166,
+        "N2": 620,
+        "N3": 53,
+        "REM": 196
+      },
+      "exclusions": {
+        "movement_time": 1,
+        "unscored": 310,
+        "unknown_annotation": 0,
+        "no_annotation": 0
+      },
+      "misaligned_annotations": [],
+      "overlapping_epochs": 0,
+      "problems": []
+    },
+    {
+      "participant_id": "SC405",
+      "recording_id": "SC405-n1",
+      "night": 1,
+      "psg_file": "SC4051E0-PSG.edf",
+      "hypnogram_file": "SC4051EC-Hypnogram.edf",
+      "psg_sha256": "e460a9589726f19a1fe544fb79c46f82562229f19696e0c0fb5ffd9f959dab7c",
+      "hypnogram_sha256": "3551410c52b819efbe6297d333ee729e4f5c7ba11c0cae6d321feee79a39ed43",
+      "published_checksum_match": "match",
+      "psg_start": "1989-04-26T16:25:00",
+      "hypnogram_start": "1989-04-26T16:25:00",
+      "psg_duration_seconds": 81660.0,
+      "hypnogram_covered_seconds": 86400.0,
+      "n_epochs_signal": 2722,
+      "n_epochs_annotated": 2880,
+      "n_epochs_labelled": 2722,
+      "n_epochs_beyond_signal": 158,
+      "annotation_coverage": 1.0,
+      "channels": [
+        {
+          "label": "EEG Fpz-Cz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -180.0,
+          "physical_max": 182.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        },
+        {
+          "label": "EEG Pz-Oz",
+          "physical_dimension": "uV",
+          "microvolt_factor": 1.0,
+          "physical_min": -194.0,
+          "physical_max": 195.0,
+          "digital_min": -2048.0,
+          "digital_max": 2047.0,
+          "sampling_rate_hz": 100.0,
+          "prefiltering": "HP:0.5Hz LP:100Hz [enhanced cassette BW]",
+          "transducer": "Ag-AgCl electrodes"
+        }
+      ],
+      "stage_counts": {
+        "Wake": 2258,
+        "N1": 44,
+        "N2": 217,
+        "N3": 135,
+        "REM": 68
+      },
+      "exclusions": {
+        "movement_time": 0,
+        "unscored": 158,
+        "unknown_annotation": 0,
+        "no_annotation": 0
+      },
+      "misaligned_annotations": [],
+      "overlapping_epochs": 0,
+      "problems": []
+    }
+  ],
+  "psg_without_hypnogram": [],
+  "hypnogram_without_psg": [],
+  "ignored_files": [],
+  "notes": {
+    "cohort": "These are the recordings present in this data root. Sleep Cassette holds 153 recordings from 78 participants; a smaller manifest is a subset, not the cohort.",
+    "checksum_source": "PhysioNet SHA256SUMS.txt"
+  }
+}
