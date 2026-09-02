@@ -26,7 +26,9 @@ dependencies = [
 
 [project.optional-dependencies]
 plots = ["matplotlib>=3.8"]
-dev   = ["pytest>=8.0", "ruff>=0.6", "matplotlib>=3.8"]
+# Ruff is pinned: an unpinned linter changes the meaning of a green CI run
+# between two commits that did not touch the code.
+dev   = ["pytest>=8.0", "ruff==0.16.5", "matplotlib>=3.8"]
 
 [project.scripts]
 sleepstatelab = "sleepstatelab.cli:main"
@@ -49,6 +51,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["F", "E4", "E7", "E9", "B", "SIM", "RUF", "C4", "PIE", "RET", "I", "UP"]
 ignore = ["RET504", "SIM108"]
+
+[tool.ruff.lint.isort]
+# The distribution is named sleep-state-lab and the package sleepstatelab, which
+# ruff cannot connect on its own; without this it sorts the package's own
+# imports as third-party and the result differs between machines.
+known-first-party = ["sleepstatelab"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "SIM", "RUF012", "B011"]

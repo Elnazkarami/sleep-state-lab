@@ -17,8 +17,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: install
@@ -26,6 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,plots]"
       - name: lint
+        # No --no-cache needed on a fresh runner, but note that ruff honours
+        # .gitignore: a directory excluded there is silently not linted, which is
+        # how a whole package once went unchecked. tests/test_packaging.py now
+        # fails if any source file is ignored.
         run: ruff check src tests
       - name: tests
         run: pytest -q -m "not realdata"

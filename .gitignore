@@ -11,17 +11,19 @@ __pycache__/
 build/
 dist/
 
-# recordings, caches, checkpoints, run outputs: never in the repository
-data/
+# recordings, caches, checkpoints, run outputs: never in the repository.
+# The leading slash matters: a bare `data/` also matches src/sleepstatelab/data,
+# which is a source package, and silently leaves it out of the repository.
+/data/
 *.edf
 *.fif
 *.npz
 *.npy
 *.pt
 *.ckpt
-cache/
-runs/
-outputs/
+/cache/
+/runs/
+/outputs/
 
 # docs/ is committed, including the generated audit figure and the generated
 # result tables: they are the evidence the README points at, and they are small.
