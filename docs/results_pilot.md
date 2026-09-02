@@ -1,6 +1,6 @@
 # Pilot: six participants, real Sleep-EDF Cassette recordings
 
-Generated from `predictions_pilot.csv` (10276 saved prediction rows), split part `test`.
+Generated from `predictions_pilot.csv` (15414 saved prediction rows), split part `test`.
 
 Primary metric: **macro-F1 computed per participant, then averaged equally across people**. Pooled macro-F1 is over all epochs at once and is given beside it, never instead of it.
 
@@ -12,14 +12,16 @@ Absent-class rule: Within a participant, a stage with no true and no predicted e
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | random_forest | 0.717 ± 0.000 | 0.717 | 0.705 | 0.757 | 0.859 | 2569 | 1 |
 | D1 | 0.702 ± 0.000 | 0.702 | 0.748 | 0.743 | 0.847 | 2569 | 1 |
+| D2 | 0.644 ± 0.000 | 0.644 | 0.718 | 0.679 | 0.807 | 2569 | 1 |
+| D2-shuffled-context | 0.644 ± 0.000 | 0.644 | 0.713 | 0.680 | 0.807 | 2569 | 1 |
 | logistic | 0.626 ± 0.000 | 0.626 | 0.644 | 0.689 | 0.815 | 2569 | 1 |
 | class_prior | 0.150 ± 0.000 | 0.150 | 0.200 | 0.000 | 0.597 | 2569 | 1 |
 
 ## Per participant (primary metric)
 
-| participant | D1 | class_prior | logistic | random_forest |
-| --- | ---: | ---: | ---: | ---: |
-| SC404 | 0.702 | 0.150 | 0.626 | 0.717 |
+| participant | D1 | D2 | D2-shuffled-context | class_prior | logistic | random_forest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SC404 | 0.702 | 0.644 | 0.644 | 0.150 | 0.626 | 0.717 |
 
 ## random_forest
 
@@ -68,6 +70,54 @@ Run `pilot6-d1`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.00
 | N2 | 0 | 62 | 433 | 17 | 108 |
 | N3 | 0 | 0 | 7 | 46 | 0 |
 | REM | 0 | 61 | 0 | 0 | 135 |
+
+## D2
+
+Run `pilot6-d2`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.000 (0 flagged epochs of 2569).
+
+### Per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.986 | 0.950 | 0.968 | 0.968 | 1534 | 1 |
+| N1 | 0.297 | 0.542 | 0.384 | 0.384 | 166 | 1 |
+| N2 | 0.963 | 0.585 | 0.728 | 0.728 | 620 | 1 |
+| N3 | 0.575 | 0.943 | 0.714 | 0.714 | 53 | 1 |
+| REM | 0.344 | 0.566 | 0.428 | 0.428 | 196 | 1 |
+
+### Confusion matrix
+
+| true \ predicted | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wake | 1458 | 58 | 3 | 0 | 15 |
+| N1 | 21 | 90 | 6 | 0 | 49 |
+| N2 | 0 | 72 | 363 | 37 | 148 |
+| N3 | 0 | 0 | 3 | 50 | 0 |
+| REM | 0 | 83 | 2 | 0 | 111 |
+
+## D2-shuffled-context
+
+Run `pilot6-d2`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.000 (0 flagged epochs of 2569).
+
+### Per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.985 | 0.950 | 0.967 | 0.967 | 1534 | 1 |
+| N1 | 0.279 | 0.530 | 0.366 | 0.366 | 166 | 1 |
+| N2 | 0.961 | 0.600 | 0.739 | 0.739 | 620 | 1 |
+| N3 | 0.581 | 0.943 | 0.719 | 0.719 | 53 | 1 |
+| REM | 0.352 | 0.541 | 0.427 | 0.427 | 196 | 1 |
+
+### Confusion matrix
+
+| true \ predicted | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wake | 1458 | 57 | 3 | 0 | 16 |
+| N1 | 22 | 88 | 7 | 0 | 49 |
+| N2 | 0 | 82 | 372 | 36 | 130 |
+| N3 | 0 | 0 | 3 | 50 | 0 |
+| REM | 0 | 88 | 2 | 0 | 106 |
 
 ## logistic
 

@@ -21,7 +21,7 @@ anywhere else in this document.
 | classical baselines (class prior, logistic regression, random forest) | **implemented**, executed on synthetic and real data |
 | D1 — trainable epoch CNN | **implemented**, executed on synthetic and real data |
 | D2 — temporal transformer over 11 epochs | **implemented**, executed on synthetic and real data |
-| shuffled-neighbour control | **implemented**, executed on real data |
+| shuffled-neighbour control | **implemented**, executed on real data — **and it fired**: see Results |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
 | D3 — D2 with a self-supervised pretrained encoder | **specified only** ([contract](docs/model_contracts.md)) — not implemented |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
@@ -386,6 +386,10 @@ validation participant macro-F1 **0.8085 at epoch 16**, which is the checkpoint
 kept. Class weights from training participants only:
 `[0.073, 2.31, 0.396, 1.171, 1.051]` for Wake / N1 / N2 / N3 / REM.
 
+D2 trained on the same CPU over the same 10,995 centres, **six passes at 772–1,355 s
+each**, best validation participant macro-F1 **0.8129 at epoch 5**. Genuine-neighbour
+coverage 0.999. Identical class counts and weights to D1's, by construction.
+
 **One held-out participant. This is a pipeline demonstration, not a benchmark**,
 and the ± 0.000 in the table is the standard deviation over a single person — it
 is not a measure of anything.
@@ -394,12 +398,14 @@ is not a measure of anything.
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | random_forest | 0.717 ± 0.000 | 0.717 | 0.705 | 0.757 | 0.859 | 2569 | 1 |
 | D1 | 0.702 ± 0.000 | 0.702 | 0.748 | 0.743 | 0.847 | 2569 | 1 |
+| D2 | 0.644 ± 0.000 | 0.644 | 0.718 | 0.679 | 0.807 | 2569 | 1 |
+| D2-shuffled-context | 0.644 ± 0.000 | 0.644 | 0.713 | 0.680 | 0.807 | 2569 | 1 |
 | logistic | 0.626 ± 0.000 | 0.626 | 0.644 | 0.689 | 0.815 | 2569 | 1 |
 | class_prior | 0.150 ± 0.000 | 0.150 | 0.200 | 0.000 | 0.597 | 2569 | 1 |
 
-| participant | D1 | class_prior | logistic | random_forest |
-| --- | ---: | ---: | ---: | ---: |
-| SC404 | 0.702 | 0.150 | 0.626 | 0.717 |
+| participant | D1 | D2 | D2-shuffled-context | class_prior | logistic | random_forest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SC404 | 0.702 | 0.644 | 0.644 | 0.150 | 0.626 | 0.717 |
 
 The class-prior row is why accuracy is not reported alone: answering "wake"
 every time scores **59.7% accuracy** on these recordings, with κ exactly zero
@@ -410,6 +416,28 @@ participant, and is beaten by the random forest on macro-F1 (0.702 vs 0.717) and
 κ (0.743 vs 0.757) while having the better balanced accuracy (0.748 vs 0.705).
 On one person, with three-quarters of the training signal being wake, **none of
 those differences should be read as a ranking.**
+
+#### The shuffled-neighbour control fired, and that is the pilot's real finding
+
+D2 and D2 with its neighbours randomly permuted score **the same to three
+decimal places** — 0.644 participant macro-F1, κ 0.679 against 0.680. Shuffling
+changes the predicted label for 104 of 2,569 epochs (4.0%), with a mean absolute
+change in probability of 0.013.
+
+That is what the control is for. **This D2 is not using temporal structure.** Its
+score is what its encoder achieves on the central epoch, plus noise from a
+transformer that has learned to route around its own context. Whatever separates
+it from D1 here, it is not the thing D2 exists to add.
+
+Two ordinary explanations, neither of which this pilot can distinguish between:
+D2 was given six passes to D1's twenty, and 8,169 of 10,995 training centres are
+wake epochs inside long stretches of wake, where a neighbour tells you nothing
+you did not already know. **D1 and D2 are therefore not compared here**, and
+their rows sit in one table only because they came from one prediction file.
+
+The result does say something useful about the code: the control is wired
+correctly and would have caught a context story that was not there. That is the
+whole reason it was implemented before the benchmark rather than after.
 
 #### D1, per stage
 
@@ -430,6 +458,20 @@ those differences should be read as a ranking.**
 | N2 | 0 | 62 | 433 | 17 | 108 |
 | N3 | 0 | 0 | 7 | 46 | 0 |
 | REM | 0 | 61 | 0 | 0 | 135 |
+
+#### D2, per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.986 | 0.950 | 0.968 | 0.968 | 1534 | 1 |
+| N1 | 0.297 | 0.542 | 0.384 | 0.384 | 166 | 1 |
+| N2 | 0.963 | 0.585 | 0.728 | 0.728 | 620 | 1 |
+| N3 | 0.575 | 0.943 | 0.714 | 0.714 | 53 | 1 |
+| REM | 0.344 | 0.566 | 0.428 | 0.428 | 196 | 1 |
+
+D2 recovers more N3 than D1 (recall 0.943 against 0.868) and much less N2
+(0.585 against 0.698). On one participant that is a description of one night,
+not a property of the architecture.
 
 N1 is the stage every automatic scorer struggles with, and it is 3.3% of these
 recordings; D1 recovers 52.4% of it at 33.5% precision. The REM row shows the
