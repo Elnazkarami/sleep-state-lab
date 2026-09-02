@@ -26,6 +26,7 @@ treats a zero epoch as a measurement.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import torch
@@ -195,7 +196,9 @@ def build_window_datasets(
     context: int = 11,
     train_participants: tuple[str, ...] | None = None,
     stats: NormalizationStats | None = None,
-) -> tuple[ContextWindowDataset, ContextWindowDataset, ContextWindowDataset, NormalizationStats]:
+    segments: bool = False,
+    centres_per_segment: int = 32,
+) -> tuple[Any, Any, Any, NormalizationStats]:
     """Train, validation and test window datasets, fitted on training only.
 
     The same contract as ``build_datasets``: statistics come from the training
@@ -237,7 +240,16 @@ def build_window_datasets(
             seed=config.split.seed,
         )
 
-    def build(records: list[EpochedRecording]) -> ContextWindowDataset:
+    def build(records: list[EpochedRecording]) -> Any:
+        if segments:
+            return SegmentDataset(
+                records,
+                config=config,
+                stats=stats,
+                reject_flags=reject,
+                context=context,
+                centres=centres_per_segment,
+            )
         return ContextWindowDataset(
             records,
             config=config,
@@ -271,3 +283,180 @@ def shuffle_context(dataset: ContextWindowDataset, *, seed: int = 0) -> None:
             order = rng.permutation(others)
             rows[window, others] = rows[window, order]
             mask[window, others] = mask[window, order]
+
+
+IGNORE_LABEL = -100
+"""Torch's cross-entropy ignore index. Padded centres carry it, so they cost a
+forward pass and contribute nothing to the loss."""
+
+
+class SegmentDataset(Dataset):
+    """Contiguous stretches of one recording, predicting every centre in them.
+
+    The same windows as :class:`ContextWindowDataset` and the same masking, laid
+    out so an epoch shared by overlapping windows is encoded once instead of
+    eleven times. A stretch of ``centres`` predictions needs
+    ``centres + context - 1`` epochs encoded, so with 32 centres and an
+    eleven-epoch context that is 42 encodings for 32 predictions rather than
+    352 -- about eight times less work per pass.
+
+    This is an implementation of the same model, not a different one. The test
+    ``test_segment_and_window_paths_agree`` asserts that a model produces the
+    same logits either way.
+
+    What it does change is what a batch is. A batch here is several stretches
+    rather than several independent windows, so the examples in it are
+    correlated in time. The encoder carries no batch statistics -- it is
+    GroupNorm throughout, for this reason among others -- so nothing in the model
+    depends on the composition of a batch; what remains is that the gradient
+    estimate at each step is a little less diverse than a fully shuffled one.
+    Stretches are drawn from random recordings in random order, which is what
+    keeps that manageable.
+    """
+
+    def __init__(
+        self,
+        recordings: list[EpochedRecording],
+        *,
+        config: Config,
+        stats: NormalizationStats,
+        reject_flags: int,
+        context: int = 11,
+        centres: int = 32,
+    ) -> None:
+        self.windows = ContextWindowDataset(
+            recordings,
+            config=config,
+            stats=stats,
+            reject_flags=reject_flags,
+            context=context,
+        )
+        self.context = context
+        self.centres = centres
+        self.half = context // 2
+        self.rows_per_segment = centres + 2 * self.half
+        self.entries = self.windows.entries
+        self.y = self.windows.y
+
+        # Where each recording's entries start in the global ordering, so a
+        # centre in a segment can be written back to the row it came from.
+        self.offsets: list[int] = []
+        seen = 0
+        for labels in self.windows.labels:
+            self.offsets.append(seen)
+            seen += int(labels.size)
+
+        self.segments: list[tuple[int, int, int]] = []
+        """(recording, first centre row, number of centres that are not duplicates)"""
+        for recording, labels in enumerate(self.windows.labels):
+            n = int(labels.size)
+            if n <= centres:
+                self.segments.append((recording, 0, n))
+                continue
+            start = 0
+            while start < n:
+                if start + centres <= n:
+                    self.segments.append((recording, start, centres))
+                    start += centres
+                else:
+                    # The tail: step back so the segment is full-length, and
+                    # mark only the centres not already covered as live, so no
+                    # epoch is trained on twice in one pass.
+                    begin = n - centres
+                    self.segments.append((recording, begin, n - start))
+                    break
+
+    def __len__(self) -> int:
+        return len(self.segments)
+
+    def centre_ids_of(self, item: int) -> np.ndarray:
+        """Global entry index for each centre of a segment, ``-1`` where there is
+        none -- padding, or a tail centre the previous segment already covered.
+
+        Kept out of the batch on purpose: a batch is ``(inputs..., target)``
+        everywhere in this package, and prediction walks the segments in order,
+        so the mapping can be recomputed rather than carried.
+        """
+        recording, first, live = self.segments[item]
+        n = int(self.windows.labels[recording].size)
+        ids = np.full(self.centres, -1, dtype=np.int64)
+        first_live = first + self.centres - live
+        for position in range(self.centres):
+            row = first + position
+            if row < n and row >= first_live:
+                ids[position] = self.offsets[recording] + row
+        return ids
+
+    def __getitem__(
+        self, item: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        recording, first, live = self.segments[item]
+        block = self.windows.blocks[recording]
+        rows = self.windows.rows[recording]
+        masks = self.windows.masks[recording]
+        labels = self.windows.labels[recording]
+        n = int(labels.size)
+
+        base = first - self.half
+        signals = np.zeros((self.rows_per_segment, *block.shape[1:]), dtype=np.float32)
+        low = max(base, 0)
+        high = min(base + self.rows_per_segment, n)
+        if high > low:
+            signals[low - base : high - base] = block[low:high]
+
+        gather = np.zeros((self.centres, self.context), dtype=np.int64)
+        mask = np.zeros((self.centres, self.context), dtype=bool)
+        y = np.full(self.centres, IGNORE_LABEL, dtype=np.int64)
+        first_live = first + self.centres - live
+
+        for position in range(self.centres):
+            row = first + position
+            if row >= n:
+                # Padding, only possible in a recording shorter than one
+                # segment. Point the window at something valid and let
+                # IGNORE_LABEL discard the result.
+                gather[position, self.half] = 0
+                mask[position, self.half] = True
+                continue
+            window_rows = rows[row]
+            # The stored mask is the authority on presence; the row array agrees
+            # with it by construction and stays in step through a shuffle,
+            # because the control permutes both together.
+            present = masks[row]
+            local = np.where(present, window_rows - base, 0)
+            gather[position] = np.clip(local, 0, self.rows_per_segment - 1)
+            mask[position] = present
+            if row >= first_live:
+                y[position] = labels[row]
+            else:
+                # An overlapping tail centre, already covered by the previous
+                # segment. Predicted and thrown away rather than trained twice.
+                mask[position, self.half] = True
+
+        return (
+            torch.from_numpy(signals),
+            torch.from_numpy(gather),
+            torch.from_numpy(mask),
+            torch.from_numpy(y),
+        )
+
+    @property
+    def participants(self) -> tuple[str, ...]:
+        return self.windows.participants
+
+    def class_counts(self) -> np.ndarray:
+        return self.windows.class_counts()
+
+    def class_weights(self, scheme: str = "inverse_frequency") -> np.ndarray:
+        return self.windows.class_weights(scheme)
+
+    def context_coverage(self) -> float:
+        return self.windows.context_coverage()
+
+    def n_centres(self) -> int:
+        """How many real predictions one pass over this dataset makes."""
+        return int(sum(live for _, _, live in self.segments))
+
+    def encodings_per_pass(self) -> int:
+        """Epoch encodings one pass costs, for comparison with the window path."""
+        return len(self.segments) * self.rows_per_segment

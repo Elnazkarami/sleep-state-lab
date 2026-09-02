@@ -149,6 +149,12 @@ class ModelConfig:
     temporal_heads: int = 4
     temporal_dropout: float = 0.1
 
+    centres_per_segment: int = 32
+    """D2 only, and an implementation detail rather than a model choice: how many
+    consecutive centres are predicted from one encoded stretch of a recording.
+    Larger reuses more encodings and makes a batch more correlated in time;
+    ``train.batch_size`` still sets how many centres are in an optimiser step."""
+
 
 @dataclass(frozen=True, slots=True)
 class TrainConfig:

@@ -48,6 +48,7 @@ model:
   temporal_layers: 2
   temporal_heads: 4
   temporal_dropout: 0.1
+  centres_per_segment: 32     # D2 training: centres predicted per encoded stretch
 
 train:
   device: cpu

@@ -163,6 +163,58 @@ class D2Classifier(nn.Module):
         centre = self.norm(encoded[:, self.centre])
         return self.head(centre)
 
+    def forward_segment(
+        self, signals: torch.Tensor, gather: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Predict many overlapping windows from one contiguous stretch of epochs.
+
+        The arithmetic is identical to calling ``forward`` on each window
+        separately; the difference is that an epoch shared by several windows is
+        encoded **once** rather than once per window. Eleven-epoch windows
+        stepped by one epoch share ten of their eleven, so a stretch of ``L``
+        centres costs ``L + 10`` encodings instead of ``11 L`` -- about nine
+        times less work for a long stretch, which is the difference between a
+        D2 pass costing eleven D1 passes and costing one and a fifth.
+
+        ``signals`` is ``[batch, rows, channels, samples]``: a contiguous run of
+        stored epochs. ``gather`` is ``[batch, centres, context]``, indexing into
+        those rows, and ``mask`` marks which of those positions are genuine
+        neighbours. A position that is absent may hold any index -- it is
+        replaced by the learned absent token before attention -- so the caller is
+        free to point it anywhere in range.
+
+        Returns ``[batch, centres, n_classes]``.
+
+        A test asserts this agrees with the per-window path to float tolerance.
+        If it ever stops agreeing, the fast path is wrong and the slow one is
+        the truth.
+        """
+        if signals.dim() != 4:
+            raise ValueError(
+                f"expected [batch, rows, channels, samples], got {tuple(signals.shape)}"
+            )
+        if gather.shape[-1] != self.context:
+            raise ValueError(
+                f"gather indexes {gather.shape[-1]} positions, this model was "
+                f"built for a context of {self.context}"
+            )
+        batch, rows, channels, samples = signals.shape
+        embedded = self.encoder(
+            signals.reshape(batch * rows, channels, samples)
+        ).embedding.reshape(batch, rows, -1)
+
+        centres = gather.shape[1]
+        width = embedded.shape[-1]
+        flat = gather.reshape(batch, centres * self.context, 1).expand(-1, -1, width)
+        windows = torch.gather(embedded, 1, flat).reshape(
+            batch, centres, self.context, width
+        )
+        logits = self.classify(
+            windows.reshape(batch * centres, self.context, width),
+            mask.reshape(batch * centres, self.context),
+        )
+        return logits.reshape(batch, centres, self.n_classes)
+
     def n_parameters(self) -> dict[str, int]:
         temporal = sum(p.numel() for p in self.transformer.parameters())
         temporal += int(self.position.numel() + self.absent.numel())

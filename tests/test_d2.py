@@ -301,3 +301,111 @@ def test_d2_can_overfit_a_tiny_batch():
         accuracy = float((model(inputs, mask).argmax(dim=1) == targets).float().mean())
     assert accuracy == 1.0
     assert float(loss.item()) < 0.05
+
+
+# --------------------------------------------------------------------------
+# The segment path: the same model, with shared encodings.
+# --------------------------------------------------------------------------
+
+
+def test_segment_forward_equals_window_forward():
+    """The claim the fast path rests on, checked directly on the model.
+
+    Overlapping windows share ten of their eleven epochs. Encoding a stretch
+    once and gathering windows out of it must give exactly what encoding each
+    window separately gives, or the speed-up is a different model.
+    """
+    torch.manual_seed(0)
+    model = D2Classifier(in_channels=2, context=5, embedding_dim=32).eval()
+    rows, centres = 12, 6
+    signals = torch.randn(2, rows, 2, 3000)
+    gather = (
+        torch.stack([torch.arange(c, c + 5) for c in range(centres)])
+        .unsqueeze(0)
+        .expand(2, -1, -1)
+        .contiguous()
+    )
+    mask = torch.ones(2, centres, 5, dtype=torch.bool)
+    mask[0, 0, 0] = False
+
+    with torch.no_grad():
+        fast = model.forward_segment(signals, gather, mask)
+        slow = torch.stack(
+            [
+                torch.stack(
+                    [
+                        model(
+                            signals[b, gather[b, c]].unsqueeze(0),
+                            mask[b, c].unsqueeze(0),
+                        )[0]
+                        for c in range(centres)
+                    ]
+                )
+                for b in range(2)
+            ]
+        )
+    assert torch.allclose(fast, slow, atol=1e-5)
+
+
+def test_segments_cover_every_centre_exactly_once(windows):
+    """No epoch trained on twice in a pass, and none skipped."""
+    from sleepstatelab.training.windows import SegmentDataset
+
+    config, split = windows
+    window_train, _, _, stats = build_window_datasets(config, split, context=11)
+    segment_train, _, _, _ = build_window_datasets(
+        config, split, context=11, segments=True, centres_per_segment=8, stats=stats
+    )
+    assert isinstance(segment_train, SegmentDataset)
+
+    ids = np.concatenate(
+        [segment_train.centre_ids_of(i) for i in range(len(segment_train))]
+    )
+    live = np.sort(ids[ids >= 0])
+    assert np.array_equal(live, np.arange(len(window_train)))
+    assert segment_train.n_centres() == len(window_train)
+
+
+def test_segments_cost_far_fewer_encodings(windows):
+    config, split = windows
+    segment_train, _, _, _ = build_window_datasets(
+        config, split, context=11, segments=True, centres_per_segment=16
+    )
+    naive = segment_train.n_centres() * 11
+    assert segment_train.encodings_per_pass() < naive / 2
+
+
+def test_segment_and_window_predictions_agree(windows):
+    """End to end: the two datasets, one model, the same probabilities.
+
+    This is what makes the fast path usable for a result rather than only for a
+    demonstration -- the validation score a run selects on is the same number
+    either way.
+    """
+    from sleepstatelab.training.trainer import build_d2, predict
+
+    config, split = windows
+    _, _, window_test, stats = build_window_datasets(config, split, context=11)
+    _, _, segment_test, _ = build_window_datasets(
+        config, split, context=11, segments=True, centres_per_segment=8, stats=stats
+    )
+    torch.manual_seed(0)
+    model = build_d2(config).eval()
+
+    slow = predict(model, window_test, device="cpu", batch_size=32)
+    fast = predict(model, segment_test, device="cpu", batch_size=4)
+    assert fast.shape == slow.shape
+    assert np.allclose(fast, slow, atol=1e-4)
+
+
+def test_segment_dataset_reports_the_same_class_counts(windows):
+    config, split = windows
+    window_train, _, _, stats = build_window_datasets(config, split, context=11)
+    segment_train, _, _, _ = build_window_datasets(
+        config, split, context=11, segments=True, centres_per_segment=8, stats=stats
+    )
+    assert np.array_equal(window_train.class_counts(), segment_train.class_counts())
+    assert np.allclose(
+        window_train.class_weights("inverse_frequency"),
+        segment_train.class_weights("inverse_frequency"),
+    )

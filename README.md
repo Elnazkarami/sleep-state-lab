@@ -336,12 +336,15 @@ D2 is trained by the same `train_supervised` routine as D1, with class weights
 from the same shared helper, so the two cannot drift apart in the ways that
 would make their difference mean something other than context.
 
-**Known inefficiency:** training encodes all eleven epochs of every window, so
-an epoch is encoded up to eleven times per pass. `D2Classifier.classify` takes
-pre-computed embeddings and is asserted to agree with the full path, so the
-eleven-times-cheaper recording-level path exists and is correct; wiring it into
-training is the next optimisation and has not been done. This is why the pilot
-gave D2 six passes to D1's twenty.
+**Shared encodings.** Overlapping windows share ten of their eleven epochs, so
+training and inference encode a contiguous stretch of a recording once and gather
+the windows out of it — 32 centres cost 42 encodings rather than 352. It is the
+same model: one test asserts the two paths produce the same logits, another that
+they produce the same probabilities end to end, and `--no-segments` keeps the
+slow path available to check against. The cost is that a batch is several
+stretches rather than several independent windows, so its examples are
+correlated in time; the encoder carries no batch statistics, so nothing in the
+model depends on that.
 
 ---
 

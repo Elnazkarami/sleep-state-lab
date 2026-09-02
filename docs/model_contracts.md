@@ -92,12 +92,20 @@ and D2 six, because a D2 pass costs about eleven times a D1 pass on a CPU. Those
 two numbers are not compute-matched and are not a measurement of what temporal
 context is worth.
 
-**A known inefficiency, stated so nobody has to discover it.** Training encodes
-all eleven epochs of every window, so an epoch is encoded up to eleven times per
-pass. `D2Classifier.classify` accepts pre-computed embeddings and a test asserts
-it agrees with the full path to float tolerance, so a recording-level inference
-path that encodes each epoch once is available and correct; wiring it into
-training is the obvious next optimisation and has not been done.
+**Shared encodings.** Overlapping windows share ten of their eleven epochs, so
+training and inference encode a contiguous stretch of a recording once and
+gather windows out of it: 32 centres cost 42 encodings instead of 352. This is
+the same model, not an approximation — `test_segment_forward_equals_window_forward`
+asserts the two paths give the same logits, and
+`test_segment_and_window_predictions_agree` asserts the same probabilities end to
+end. `--no-segments` runs the window-by-window path, kept so the fast one can be
+checked against it.
+
+What it does change is what a batch is: several stretches rather than several
+independent windows, so examples within a step are correlated in time. The
+encoder carries no batch statistics — GroupNorm throughout — so nothing in the
+model depends on batch composition; what remains is a slightly less diverse
+gradient at each step.
 
 ---
 

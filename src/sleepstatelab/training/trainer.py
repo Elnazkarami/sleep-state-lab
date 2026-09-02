@@ -33,6 +33,7 @@ from sleepstatelab.models.d1 import D1Classifier
 from sleepstatelab.models.encoder import EpochEncoder
 from sleepstatelab.provenance import code_revision
 from sleepstatelab.training.checkpoint import CHECKPOINT_FORMAT, Checkpoint, save_checkpoint
+from sleepstatelab.training.windows import IGNORE_LABEL
 
 
 def seed_everything(seed: int) -> None:
@@ -90,6 +91,21 @@ def split_batch(batch: Sequence[Any], device: str) -> tuple[list[torch.Tensor], 
     return [tensor.to(device) for tensor in inputs], targets.to(device)
 
 
+def flatten_logits(
+    logits: torch.Tensor, targets: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fold a per-segment prediction into the flat shape the loss expects.
+
+    A segment model returns ``[batch, centres, classes]`` against
+    ``[batch, centres]`` targets; everything else returns ``[batch, classes]``
+    against ``[batch]``. Padded centres carry ``IGNORE_LABEL``, which the loss
+    is configured to skip, so folding them in costs nothing.
+    """
+    if logits.dim() == 3:
+        return logits.reshape(-1, logits.shape[-1]), targets.reshape(-1)
+    return logits, targets
+
+
 @torch.no_grad()
 def predict(
     model: nn.Module,
@@ -98,8 +114,19 @@ def predict(
     device: str,
     batch_size: int = 256,
 ) -> np.ndarray:
-    """Probabilities ``[n, 5]`` in stage order, in dataset order."""
+    """Probabilities ``[n, 5]`` in stage order, one row per example.
+
+    For a segment dataset the examples are the centres, not the segments, so the
+    result is written back through each segment's centre ids and comes out in
+    the same order -- and with the same length -- as the window dataset would
+    have produced. That is what lets the two paths be compared, and what lets
+    the validation metric be computed the same way for every model.
+    """
+    from sleepstatelab.training.windows import SegmentDataset
+
     model.eval()
+    if isinstance(dataset, SegmentDataset):
+        return _predict_segments(model, dataset, device=device, batch_size=batch_size)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     blocks: list[np.ndarray] = []
     for batch in loader:
@@ -107,6 +134,34 @@ def predict(
         logits = model(*inputs)
         blocks.append(torch.softmax(logits, dim=1).cpu().numpy())
     return np.concatenate(blocks, axis=0) if blocks else np.empty((0, len(STAGES)))
+
+
+@torch.no_grad()
+def _predict_segments(
+    model: nn.Module, dataset: Any, *, device: str, batch_size: int = 8
+) -> np.ndarray:
+    """Centre probabilities from a segment dataset, in entry order."""
+    out = np.zeros((len(dataset.entries), len(STAGES)), dtype=np.float64)
+    written = np.zeros(len(dataset.entries), dtype=bool)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    segment = 0
+    for signals, gather, mask, _ in loader:
+        logits = model.forward_segment(
+            signals.to(device), gather.to(device), mask.to(device)
+        )
+        probabilities = torch.softmax(logits, dim=-1).cpu().numpy()
+        for row in range(probabilities.shape[0]):
+            ids = dataset.centre_ids_of(segment)
+            live = ids >= 0
+            out[ids[live]] = probabilities[row][live]
+            written[ids[live]] = True
+            segment += 1
+    if not written.all():
+        raise RuntimeError(
+            f"{int((~written).sum())} centre(s) were never predicted; the segment "
+            "plan does not cover the dataset"
+        )
+    return out
 
 
 def participant_mean_macro_f1(dataset: Any, probabilities: np.ndarray) -> float:
@@ -242,7 +297,7 @@ def train_supervised(
     weights = torch.tensor(
         train.class_weights(config.train.class_weighting), dtype=torch.float32, device=device
     )
-    criterion = nn.CrossEntropyLoss(weight=weights)
+    criterion = nn.CrossEntropyLoss(weight=weights, ignore_index=IGNORE_LABEL)
     optimiser = torch.optim.AdamW(
         model.parameters(),
         lr=config.train.learning_rate,
@@ -275,13 +330,15 @@ def train_supervised(
                 break
             inputs, targets = split_batch(items, device)
             optimiser.zero_grad(set_to_none=True)
-            loss = criterion(model(*inputs), targets)
+            logits, flat_targets = flatten_logits(model(*inputs), targets)
+            loss = criterion(logits, flat_targets)
             loss.backward()
             if config.train.grad_clip > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), config.train.grad_clip)
             optimiser.step()
-            total_loss += float(loss.item()) * inputs[0].shape[0]
-            seen += int(inputs[0].shape[0])
+            counted = int((flat_targets != IGNORE_LABEL).sum().item())
+            total_loss += float(loss.item()) * counted
+            seen += counted
         scheduler.step()
 
         val_probabilities = predict(model, val, device=device)

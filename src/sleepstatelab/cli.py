@@ -1,643 +1,431 @@
-"""The command line: one subcommand per stage, each a thin wrapper over a module.
+"""The supervised loop for D1, and the rule for stopping it.
 
-Nothing is implemented here. Every command below builds a configuration, calls
-into the package, and prints what came back -- so anything the command line can
-do is available from a notebook or a script on the same terms, and the pipeline
-does not live in an argument parser.
+**The stopping rule is validation participant macro-F1.** Not loss, because a
+class-weighted cross-entropy on a 70%-wake problem improves for a while by
+becoming better at wake; not test anything, ever. The checkpoint that is kept is
+the epoch with the best validation score, and the epoch number is recorded so a
+run that stopped at its first epoch is visible as such.
+
+**Seeding is explicit and complete.** Python, NumPy and torch are all seeded
+from the configured value, and the seed is recorded in the checkpoint. This does
+not make a CUDA run bit-identical -- it is not claimed to; on CPU it does.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
-import sys
+import random
 import time
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import torch
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
 
-from sleepstatelab import __version__
-from sleepstatelab.config import Config, load
-from sleepstatelab.devices import probe, resolve
+from sleepstatelab.config import Config
+from sleepstatelab.data.splits import Split
+from sleepstatelab.evaluation.metrics import participant_macro_f1
 from sleepstatelab.labels import STAGES
+from sleepstatelab.models.d1 import D1Classifier
+from sleepstatelab.models.encoder import EpochEncoder
+from sleepstatelab.provenance import code_revision
+from sleepstatelab.training.checkpoint import CHECKPOINT_FORMAT, Checkpoint, save_checkpoint
+from sleepstatelab.training.windows import IGNORE_LABEL
 
 
-def _with_overrides(config: Config, args: argparse.Namespace) -> Config:
-    """Apply the handful of overrides the command line accepts.
+def seed_everything(seed: int) -> None:
+    """Seed every generator this package draws from."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-    Deliberately few. Anything that changes what a model sees belongs in a
-    configuration file that can be hashed and recorded, not in a shell history.
+
+@dataclass
+class TrainingHistory:
+    """What happened, per pass over the training set."""
+
+    rows: list[dict[str, float]] = field(default_factory=list)
+
+    def add(self, **values: float) -> None:
+        self.rows.append({k: float(v) for k, v in values.items()})
+
+    def best(self, key: str = "val_participant_macro_f1") -> dict[str, float]:
+        return max(self.rows, key=lambda row: row.get(key, float("-inf")))
+
+
+def encoder_kwargs(config: Config) -> dict[str, Any]:
+    """The encoder's constructor arguments, derived from the configuration once."""
+    return {
+        "in_channels": len(config.data.channels),
+        "stem_channels": config.model.stem_channels,
+        "stem_kernel": config.model.stem_kernel,
+        "stem_stride": config.model.stem_stride,
+        "block_channels": tuple(config.model.block_channels),
+        "block_kernel": config.model.block_kernel,
+        "embedding_dim": config.model.embedding_dim,
+    }
+
+
+def build_model(config: Config) -> D1Classifier:
+    return D1Classifier.from_encoder(
+        EpochEncoder(**encoder_kwargs(config)),
+        n_classes=config.model.n_classes,
+        dropout=config.model.dropout,
+    )
+
+
+def split_batch(batch: Sequence[Any], device: str) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """Separate a batch into the model's inputs and its targets.
+
+    D1's dataset yields ``(x, y)`` and D2's yields ``(x, mask, y)``. Rather than
+    two training loops that can drift apart -- and they would, which is exactly
+    what would make a D2-minus-D1 comparison meaningless -- the loop takes the
+    last element as the target and passes the rest to the model.
     """
-    import dataclasses
-
-    data = config.data
-    train = config.train
-    if getattr(args, "data_root", None):
-        data = dataclasses.replace(data, root=args.data_root)
-    if getattr(args, "cache_dir", None):
-        data = dataclasses.replace(data, cache_dir=args.cache_dir)
-    if getattr(args, "checksums", None):
-        data = dataclasses.replace(data, checksums=args.checksums)
-    if getattr(args, "participants", None):
-        data = dataclasses.replace(data, participants=tuple(args.participants))
-    if getattr(args, "device", None):
-        train = dataclasses.replace(train, device=args.device)
-    if getattr(args, "epochs", None):
-        train = dataclasses.replace(train, epochs=int(args.epochs))
-    if getattr(args, "seed", None) is not None:
-        train = dataclasses.replace(train, seed=int(args.seed))
-    return dataclasses.replace(config, data=data, train=train)
+    *inputs, targets = batch
+    return [tensor.to(device) for tensor in inputs], targets.to(device)
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
-    """What this machine can run, and what is installed."""
-    print(f"sleepstatelab {__version__}")
-    print(probe().summary())
-    print(f"resolved device for --device {args.device}: {resolve(args.device)}")
-    for name in ("numpy", "scipy", "sklearn", "torch", "mne", "matplotlib"):
-        try:
-            module = __import__(name)
-            print(f"{name}: {getattr(module, '__version__', 'unknown')}")
-        except ImportError:
-            print(f"{name}: NOT INSTALLED")
-    return 0
+def flatten_logits(
+    logits: torch.Tensor, targets: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fold a per-segment prediction into the flat shape the loss expects.
+
+    A segment model returns ``[batch, centres, classes]`` against
+    ``[batch, centres]`` targets; everything else returns ``[batch, classes]``
+    against ``[batch]``. Padded centres carry ``IGNORE_LABEL``, which the loss
+    is configured to skip, so folding them in costs nothing.
+    """
+    if logits.dim() == 3:
+        return logits.reshape(-1, logits.shape[-1]), targets.reshape(-1)
+    return logits, targets
 
 
-def cmd_audit(args: argparse.Namespace) -> int:
-    """Discover recordings and write the manifest."""
-    from sleepstatelab.data.manifest import build_manifest
+@torch.no_grad()
+def predict(
+    model: nn.Module,
+    dataset: Dataset,
+    *,
+    device: str,
+    batch_size: int = 256,
+) -> np.ndarray:
+    """Probabilities ``[n, 5]`` in stage order, one row per example.
 
-    config = _with_overrides(load(args.config), args)
-    started = time.time()
-    manifest = build_manifest(
-        config.data.root,
-        channels=tuple(config.data.channels),
-        epoch_seconds=config.data.epoch_seconds,
-        expected_rate_hz=config.data.sampling_rate_hz,
-        participants=tuple(config.data.participants),
-        nights=tuple(config.data.nights),
-        checksum_file=config.data.checksums or None,
-        checksums=not args.no_checksums,
-        progress=True,
-    )
-    manifest.write(args.output)
-    print()
-    print(manifest.summary())
-    print(f"participants: {', '.join(manifest.participants)}")
-    unusable = [e for e in manifest.entries if not e.usable]
-    if unusable:
-        print(f"\n{len(unusable)} recording(s) with problems:")
-        for entry in unusable:
-            print(f"  {entry.recording_id}: {'; '.join(entry.problems)}")
-    print(f"\nwritten to {args.output} in {time.time() - started:.0f}s")
-    print(
-        "This is what is present in the data root. Sleep Cassette holds 153 "
-        "recordings from 78 participants; a smaller manifest is a subset."
-    )
-    return 0
+    For a segment dataset the examples are the centres, not the segments, so the
+    result is written back through each segment's centre ids and comes out in
+    the same order -- and with the same length -- as the window dataset would
+    have produced. That is what lets the two paths be compared, and what lets
+    the validation metric be computed the same way for every model.
+    """
+    from sleepstatelab.training.windows import SegmentDataset
+
+    model.eval()
+    if isinstance(dataset, SegmentDataset):
+        return _predict_segments(model, dataset, device=device, batch_size=batch_size)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    blocks: list[np.ndarray] = []
+    for batch in loader:
+        inputs, _ = split_batch(batch, device)
+        logits = model(*inputs)
+        blocks.append(torch.softmax(logits, dim=1).cpu().numpy())
+    return np.concatenate(blocks, axis=0) if blocks else np.empty((0, len(STAGES)))
 
 
-def cmd_prepare(args: argparse.Namespace) -> int:
-    """Cut every discovered recording into epochs and cache them."""
-    from sleepstatelab.data.prepare import prepare
-
-    config = _with_overrides(load(args.config), args)
-    started = time.time()
-    report = prepare(config, progress=True, force=args.force)
-    print()
-    print(report.summary())
-    print(f"exclusions: {json.dumps(report.exclusions)}")
-    print(f"cache: {report.cache_dir}  ({time.time() - started:.0f}s)")
-    return 0
-
-
-def cmd_audit_report(args: argparse.Namespace) -> int:
-    """The single-recording audit, with figures."""
-    from sleepstatelab.data.audit import audit_report
-
-    config = _with_overrides(load(args.config), args)
-    _, path = audit_report(config, args.recording, out_dir=args.out_dir)
-    print(f"written to {path}")
-    return 0
-
-
-def cmd_split(args: argparse.Namespace) -> int:
-    """Generate the participant-disjoint split."""
-    from sleepstatelab.data.prepare import load_cached
-    from sleepstatelab.data.splits import grouped_split, label_budget_subsets
-
-    config = _with_overrides(load(args.config), args)
-    participants = sorted({record.participant_id for record in load_cached(config)})
-    split = grouped_split(
-        participants,
-        seed=config.split.seed,
-        train_fraction=config.split.train_fraction,
-        val_fraction=config.split.val_fraction,
-        name=args.name,
-    )
-    split.write(args.output)
-    print(split.summary())
-    print(f"train: {', '.join(split.train)}")
-    print(f"val:   {', '.join(split.val)}")
-    print(f"test:  {', '.join(split.test)}")
-    budgets = label_budget_subsets(split, tuple(config.split.label_budgets), seed=config.split.seed)
-    print("\nnested label budgets over the training participants:")
-    for budget, people in budgets.items():
-        print(f"  {budget:>5.0%}: {len(people)} participant(s) -- {', '.join(people)}")
-    print(f"\nwritten to {args.output}")
-    return 0
-
-
-def cmd_baselines(args: argparse.Namespace) -> int:
-    """Fit the classical baselines and save their predictions."""
-    from sleepstatelab.baselines.classical import run_baselines
-    from sleepstatelab.data.prepare import load_cached, reject_mask_flags
-    from sleepstatelab.data.preprocess import bandpass
-    from sleepstatelab.data.splits import Split
-    from sleepstatelab.evaluation.predictions import PredictionWriter
-    from sleepstatelab.features.spectral import feature_matrix
-    from sleepstatelab.provenance import make_run_provenance
-
-    config = _with_overrides(load(args.config), args)
-    split = Split.read(args.split)
-    reject = reject_mask_flags(tuple(config.preprocess.qc_reject))
-
-    def block(participants: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray, list, list, np.ndarray, np.ndarray]:
-        records = load_cached(config, participants)
-        features, labels, people, recordings, indices, flags = [], [], [], [], [], []
-        for record in records:
-            keep = record.eligible(reject)
-            if not keep.any():
-                continue
-            print(f"  features for {record.recording_id} ({int(keep.sum())} epochs)", flush=True)
-            # The same band-pass the CNN's inputs get, so the two models are
-            # given the same signal and differ only in what they do with it.
-            # Normalisation is deliberately not applied: the features are
-            # scale-aware by design and the scaler inside each pipeline is
-            # fitted on the training fold anyway.
-            filtered = bandpass(record.signals[keep], record.sampling_rate_hz, config.preprocess)
-            features.append(feature_matrix(filtered, record.sampling_rate_hz))
-            labels.append(record.labels[keep].astype(int))
-            people.extend([record.participant_id] * int(keep.sum()))
-            recordings.extend([record.recording_id] * int(keep.sum()))
-            indices.append(record.epoch_index[keep])
-            flags.append(record.qc[keep])
-        return (
-            np.vstack(features),
-            np.concatenate(labels),
-            people,
-            recordings,
-            np.concatenate(indices),
-            np.concatenate(flags),
+@torch.no_grad()
+def _predict_segments(
+    model: nn.Module, dataset: Any, *, device: str, batch_size: int = 8
+) -> np.ndarray:
+    """Centre probabilities from a segment dataset, in entry order."""
+    out = np.zeros((len(dataset.entries), len(STAGES)), dtype=np.float64)
+    written = np.zeros(len(dataset.entries), dtype=bool)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    segment = 0
+    for signals, gather, mask, _ in loader:
+        logits = model.forward_segment(
+            signals.to(device), gather.to(device), mask.to(device)
         )
-
-    print("training features:")
-    train_x, train_y, _, _, _, _ = block(split.train)
-    print(f"evaluation features ({args.part}):")
-    evaluate_on = getattr(split, args.part)
-    eval_x, eval_y, people, recordings, indices, flags = block(evaluate_on)
-
-    run_id = args.run_id or f"baselines-{split.identity}"
-    predictions = run_baselines(train_x=train_x, train_y=train_y, eval_x=eval_x)
-    with PredictionWriter(args.output) as writer:
-        for name, probabilities in predictions.items():
-            writer.write(
-                run_id=run_id,
-                model=name,
-                split_id=split.identity,
-                split_part=args.part,
-                seed=config.split.seed,
-                participant_ids=people,
-                recording_ids=recordings,
-                epoch_indices=indices,
-                true_labels=eval_y,
-                probabilities=probabilities,
-                qc_flags=flags,
-            )
-    provenance = make_run_provenance(
-        run_id=run_id,
-        device="cpu",
-        seed=config.split.seed,
-        config=config.to_dict(),
-        split_id=split.identity,
-        channels=tuple(config.data.channels),
-        label_order=STAGES,
-        preprocessing_id=config.preprocessing_identity,
-        notes=f"classical baselines on {args.part}",
-        extra={"n_train_epochs": int(train_x.shape[0]), "n_features": int(train_x.shape[1])},
-    )
-    provenance.write(Path(args.output).with_suffix(".provenance.json"))
-    print(f"\n{train_x.shape[0]} training epochs, {eval_x.shape[0]} evaluation epochs")
-    print(f"predictions written to {args.output}")
-    return 0
-
-
-def cmd_train_d1(args: argparse.Namespace) -> int:
-    """Train D1 and save its checkpoint."""
-    from sleepstatelab.data.splits import Split, label_budget_subsets
-    from sleepstatelab.provenance import make_run_provenance
-    from sleepstatelab.training.dataset import build_datasets
-    from sleepstatelab.training.trainer import train_d1
-
-    config = _with_overrides(load(args.config), args)
-    device = resolve(config.train.device)
-    split = Split.read(args.split)
-
-    budget_participants = None
-    if args.label_budget is not None:
-        budget_participants = label_budget_subsets(
-            split, (args.label_budget,), seed=config.split.seed
-        )[args.label_budget]
-        print(
-            f"label budget {args.label_budget:.0%}: training on "
-            f"{len(budget_participants)} of {len(split.train)} participants. "
-            "Validation labels are NOT reduced."
+        probabilities = torch.softmax(logits, dim=-1).cpu().numpy()
+        for row in range(probabilities.shape[0]):
+            ids = dataset.centre_ids_of(segment)
+            live = ids >= 0
+            out[ids[live]] = probabilities[row][live]
+            written[ids[live]] = True
+            segment += 1
+    if not written.all():
+        raise RuntimeError(
+            f"{int((~written).sum())} centre(s) were never predicted; the segment "
+            "plan does not cover the dataset"
         )
+    return out
 
-    train, val, test, stats = build_datasets(
-        config, split, train_participants=budget_participants
-    )
-    print(
-        f"train {len(train)} epochs / {len(train.participants)} participants; "
-        f"val {len(val)} / {len(val.participants)}; "
-        f"test {len(test)} / {len(test.participants)}"
-    )
-    print(f"normalization {stats.method} [{stats.identity}] fitted on {list(stats.fitted_on)}")
-    print(f"class counts (train): {dict(zip(STAGES, train.class_counts().tolist(), strict=True))}")
-    print(f"class weights (train): {np.round(train.class_weights(config.train.class_weighting), 3).tolist()}")
-    print(f"device: {device}")
 
-    run_id = args.run_id or f"d1-{split.identity}-s{config.train.seed}"
-    _, checkpoint, _ = train_d1(
+def participant_mean_macro_f1(dataset: Any, probabilities: np.ndarray) -> float:
+    """The primary metric, computed on a dataset's own participant labels."""
+    predicted = probabilities.argmax(axis=1)
+    truth = dataset.y
+    people = np.array([entry.participant_id for entry in dataset.entries])
+    scores = []
+    for person in sorted(set(people.tolist())):
+        mask = people == person
+        score, _, _ = participant_macro_f1(truth[mask], predicted[mask])
+        if not np.isnan(score):
+            scores.append(score)
+    return float(np.mean(scores)) if scores else float("nan")
+
+
+def train_d1(
+    config: Config,
+    split: Split,
+    train: Any,
+    val: Any,
+    *,
+    device: str = "cpu",
+    checkpoint_path: Path | str | None = None,
+    run_id: str = "d1",
+    progress: bool = True,
+) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
+    """Train D1, selecting on validation participant macro-F1."""
+    return train_supervised(
         config,
         split,
         train,
         val,
+        model=build_model(config),
+        model_name="D1",
+        temporal_kwargs={},
         device=device,
-        checkpoint_path=args.checkpoint,
+        checkpoint_path=checkpoint_path,
         run_id=run_id,
+        progress=progress,
     )
-    print(
-        f"\nselected epoch {checkpoint.epoch_selected + 1} with validation "
-        f"participant macro-F1 {checkpoint.val_metric_value:.4f}"
-    )
-    print(f"parameters: {checkpoint.notes['n_parameters']}")
-    print(f"checkpoint written to {args.checkpoint}")
-    make_run_provenance(
-        run_id=run_id,
-        device=device,
-        seed=config.train.seed,
-        config=config.to_dict(),
-        split_id=split.identity,
-        channels=tuple(config.data.channels),
-        label_order=STAGES,
-        preprocessing_id=config.preprocessing_identity,
-        notes="D1 supervised training",
-        extra={"label_budget": args.label_budget, "checkpoint": str(args.checkpoint)},
-    ).write(Path(args.checkpoint).with_suffix(".provenance.json"))
-    return 0
 
 
-def cmd_train_d2(args: argparse.Namespace) -> int:
-    """Train D2: the same encoder, with a transformer over eleven epochs."""
-    from sleepstatelab.data.splits import Split, label_budget_subsets
-    from sleepstatelab.provenance import make_run_provenance
-    from sleepstatelab.training.checkpoint import load_checkpoint
-    from sleepstatelab.training.trainer import train_d2
-    from sleepstatelab.training.windows import build_window_datasets
+def build_d2(config: Config, *, encoder: EpochEncoder | None = None) -> Any:
+    """D2 with a fresh or supplied encoder.
 
-    config = _with_overrides(load(args.config), args)
-    device = resolve(config.train.device)
-    split = Split.read(args.split)
+    ``encoder`` is how a pretrained backbone enters the model, which is the
+    route D3 will take. Passing one that was built with different arguments than
+    the configuration asks for is refused, because the checkpoint would then
+    record a shape the weights do not have.
+    """
+    from sleepstatelab.models.d2 import D2Classifier
 
-    budget_participants = None
-    if args.label_budget is not None:
-        budget_participants = label_budget_subsets(
-            split, (args.label_budget,), seed=config.split.seed
-        )[args.label_budget]
-        print(
-            f"label budget {args.label_budget:.0%}: training on "
-            f"{len(budget_participants)} of {len(split.train)} participants. "
-            "Validation labels are NOT reduced."
+    if encoder is None:
+        encoder = EpochEncoder(**encoder_kwargs(config))
+    elif encoder.embedding_dim != config.model.embedding_dim:
+        raise ValueError(
+            f"the supplied encoder has embedding dimension {encoder.embedding_dim}, "
+            f"the configuration asks for {config.model.embedding_dim}"
         )
-
-    encoder = None
-    if args.init_encoder:
-        # The route a pretrained backbone takes into D2, and the one D3 will
-        # use. It is named in the checkpoint so a run started from a pretrained
-        # encoder can never be mistaken for one started from random weights.
-        source, source_checkpoint = load_checkpoint(
-            args.init_encoder,
-            expect_channels=tuple(config.data.channels),
-            expect_preprocessing_id=config.preprocessing_identity,
-        )
-        encoder = source.encoder
-        print(
-            f"encoder initialised from {args.init_encoder} "
-            f"({source_checkpoint.model_name}, run "
-            f"{source_checkpoint.notes.get('run_id', 'unknown')})"
-        )
-
-    train, val, test, stats = build_window_datasets(
-        config,
-        split,
+    return D2Classifier.from_encoder(
+        encoder,
         context=config.model.context_epochs,
-        train_participants=budget_participants,
+        n_layers=config.model.temporal_layers,
+        n_heads=config.model.temporal_heads,
+        n_classes=config.model.n_classes,
+        dropout=config.model.dropout,
+        transformer_dropout=config.model.temporal_dropout,
     )
-    print(
-        f"train {len(train)} windows / {len(train.participants)} participants; "
-        f"val {len(val)} / {len(val.participants)}; "
-        f"test {len(test)} / {len(test.participants)}"
-    )
-    print(
-        f"context {config.model.context_epochs} epochs; genuine-neighbour "
-        f"coverage: train {train.context_coverage():.3f}, "
-        f"val {val.context_coverage():.3f}, test {test.context_coverage():.3f}"
-    )
-    print(f"normalization {stats.method} [{stats.identity}] fitted on {list(stats.fitted_on)}")
-    print(f"class counts (train): {dict(zip(STAGES, train.class_counts().tolist(), strict=True))}")
-    print(f"device: {device}")
 
-    run_id = args.run_id or f"d2-{split.identity}-s{config.train.seed}"
-    _, checkpoint, _ = train_d2(
+
+def temporal_kwargs_of(config: Config) -> dict[str, Any]:
+    """What a D2 checkpoint has to record to be rebuildable."""
+    return {
+        "context": config.model.context_epochs,
+        "n_layers": config.model.temporal_layers,
+        "n_heads": config.model.temporal_heads,
+        "transformer_dropout": config.model.temporal_dropout,
+    }
+
+
+def train_d2(
+    config: Config,
+    split: Split,
+    train: Any,
+    val: Any,
+    *,
+    encoder: EpochEncoder | None = None,
+    device: str = "cpu",
+    checkpoint_path: Path | str | None = None,
+    run_id: str = "d2",
+    progress: bool = True,
+    loader_batch_size: int | None = None,
+) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
+    """Train D2 under settings identical to D1's, which is the whole point."""
+    return train_supervised(
         config,
         split,
         train,
         val,
-        encoder=encoder,
+        model=build_d2(config, encoder=encoder),
+        model_name="D2",
+        temporal_kwargs=temporal_kwargs_of(config),
         device=device,
-        checkpoint_path=args.checkpoint,
+        checkpoint_path=checkpoint_path,
         run_id=run_id,
+        progress=progress,
+        loader_batch_size=loader_batch_size,
     )
-    print(
-        f"\nselected epoch {checkpoint.epoch_selected + 1} with validation "
-        f"participant macro-F1 {checkpoint.val_metric_value:.4f}"
-    )
-    print(f"parameters: {checkpoint.notes['n_parameters']}")
-    print(f"checkpoint written to {args.checkpoint}")
-    make_run_provenance(
-        run_id=run_id,
-        device=device,
-        seed=config.train.seed,
-        config=config.to_dict(),
-        split_id=split.identity,
-        channels=tuple(config.data.channels),
-        label_order=STAGES,
-        preprocessing_id=config.preprocessing_identity,
-        notes="D2 supervised training (offline: uses future context)",
-        extra={
-            "label_budget": args.label_budget,
-            "checkpoint": str(args.checkpoint),
-            "init_encoder": args.init_encoder,
-            "context_epochs": config.model.context_epochs,
-            "context_coverage_train": train.context_coverage(),
-        },
-    ).write(Path(args.checkpoint).with_suffix(".provenance.json"))
-    return 0
 
 
-def cmd_predict(args: argparse.Namespace) -> int:
-    """Run a checkpoint over a split part and save one row per epoch."""
-    from sleepstatelab.data.preprocess import NormalizationStats
-    from sleepstatelab.data.splits import Split
-    from sleepstatelab.evaluation.predictions import PredictionWriter
-    from sleepstatelab.training.checkpoint import load_checkpoint
-    from sleepstatelab.training.dataset import build_datasets
-    from sleepstatelab.training.trainer import predict
+def train_supervised(
+    config: Config,
+    split: Split,
+    train: Any,
+    val: Any,
+    *,
+    model: nn.Module,
+    model_name: str,
+    temporal_kwargs: dict[str, Any],
+    device: str = "cpu",
+    checkpoint_path: Path | str | None = None,
+    run_id: str = "run",
+    progress: bool = True,
+    loader_batch_size: int | None = None,
+) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
+    """The supervised loop, shared by every model this repository trains.
 
-    config = _with_overrides(load(args.config), args)
-    device = resolve(config.train.device)
-    split = Split.read(args.split)
-    model, checkpoint = load_checkpoint(
-        args.checkpoint,
-        expect_channels=tuple(config.data.channels),
-        expect_preprocessing_id=config.preprocessing_identity,
-    )
-    if checkpoint.split_id != split.identity:
-        raise SystemExit(
-            f"checkpoint was trained on split {checkpoint.split_id} and "
-            f"{args.split} is {split.identity}. Refusing: the test participants "
-            "may not be the same people."
-        )
+    ``loader_batch_size`` is how many *dataset items* go into a step, which is
+    only different from ``config.train.batch_size`` when an item holds more than
+    one example -- a segment of centres. The configuration keeps counting
+    examples, so a checkpoint says what it means.
+
+    Shared deliberately. If D1 and D2 had a loop each, the two would drift --
+    a different schedule here, a different clipping threshold there -- and the
+    difference between their scores would stop being temporal context.
+    """
+    seed_everything(config.train.seed)
     model = model.to(device)
 
-    # The checkpoint's own normalisation, not a freshly fitted one: the model
-    # must see signals scaled exactly as they were during training.
-    stats = NormalizationStats(
-        method=checkpoint.normalization["method"],
-        channels=tuple(checkpoint.normalization["channels"]),
-        centre=tuple(checkpoint.normalization["centre"]),
-        scale=tuple(checkpoint.normalization["scale"]),
-        fitted_on=tuple(checkpoint.normalization["fitted_on"]),
-        n_epochs=checkpoint.normalization["n_epochs"],
-        clip_sigma=checkpoint.normalization["clip_sigma"],
+    weights = torch.tensor(
+        train.class_weights(config.train.class_weighting), dtype=torch.float32, device=device
     )
-    leaked = set(stats.fitted_on) & set(split.test)
-    if leaked:
-        raise SystemExit(
-            f"refusing to predict: the checkpoint's normalization was fitted on "
-            f"test participants {sorted(leaked)}"
+    criterion = nn.CrossEntropyLoss(weight=weights, ignore_index=IGNORE_LABEL)
+    optimiser = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.train.learning_rate,
+        weight_decay=config.train.weight_decay,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimiser, T_max=max(config.train.epochs, 1)
+    )
+    loader = DataLoader(
+        train,
+        batch_size=loader_batch_size or config.train.batch_size,
+        shuffle=True,
+        num_workers=config.train.num_workers,
+        drop_last=False,
+    )
+
+    history = TrainingHistory()
+    best_score = float("-inf")
+    best_state: dict[str, Any] | None = None
+    best_epoch = -1
+    since_improvement = 0
+
+    for epoch in range(config.train.epochs):
+        model.train()
+        started = time.time()
+        total_loss = 0.0
+        seen = 0
+        for batch, items in enumerate(loader):
+            if config.train.max_train_batches and batch >= config.train.max_train_batches:
+                break
+            inputs, targets = split_batch(items, device)
+            optimiser.zero_grad(set_to_none=True)
+            logits, flat_targets = flatten_logits(model(*inputs), targets)
+            loss = criterion(logits, flat_targets)
+            loss.backward()
+            if config.train.grad_clip > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), config.train.grad_clip)
+            optimiser.step()
+            counted = int((flat_targets != IGNORE_LABEL).sum().item())
+            total_loss += float(loss.item()) * counted
+            seen += counted
+        scheduler.step()
+
+        val_probabilities = predict(model, val, device=device)
+        val_score = participant_mean_macro_f1(val, val_probabilities)
+        history.add(
+            epoch=epoch,
+            train_loss=total_loss / max(seen, 1),
+            val_participant_macro_f1=val_score,
+            seconds=time.time() - started,
         )
-    if checkpoint.temporal_kwargs:
-        from sleepstatelab.training.windows import build_window_datasets
+        if progress:
+            print(
+                f"  epoch {epoch + 1}/{config.train.epochs}  "
+                f"loss {total_loss / max(seen, 1):.4f}  "
+                f"val participant macro-F1 {val_score:.4f}  "
+                f"({time.time() - started:.0f}s)",
+                flush=True,
+            )
 
-        train, val, test, _ = build_window_datasets(
-            config,
-            split,
-            context=int(checkpoint.temporal_kwargs.get("context", 11)),
-            stats=stats,
-        )
-    else:
-        train, val, test, _ = build_datasets(config, split, stats=stats)
-    dataset = {"train": train, "val": val, "test": test}[args.part]
-    if args.shuffle_context:
-        if not checkpoint.temporal_kwargs:
-            raise SystemExit("--shuffle-context only means something for a temporal model")
-        from sleepstatelab.training.windows import shuffle_context
+        if val_score > best_score:
+            best_score = val_score
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            best_epoch = epoch
+            since_improvement = 0
+        else:
+            since_improvement += 1
+            if since_improvement >= config.train.early_stopping_patience:
+                if progress:
+                    print(
+                        f"  stopping: no improvement in "
+                        f"{config.train.early_stopping_patience} epochs",
+                        flush=True,
+                    )
+                break
 
-        shuffle_context(dataset, seed=args.shuffle_seed)
-        print(
-            f"CONTROL RUN: the non-central positions of every window have been "
-            f"shuffled with seed {args.shuffle_seed}. If the score holds up, the "
-            "model is not using temporal structure."
-        )
-    probabilities = predict(model, dataset, device=device)
-    with PredictionWriter(args.output, overwrite=not args.append) as writer:
-        writer.write(
-            run_id=checkpoint.notes.get("run_id", "d1"),
-            model=args.model_name,
-            split_id=split.identity,
-            split_part=args.part,
-            seed=checkpoint.seed,
-            participant_ids=[e.participant_id for e in dataset.entries],
-            recording_ids=[e.recording_id for e in dataset.entries],
-            epoch_indices=np.array([e.epoch_index for e in dataset.entries]),
-            true_labels=dataset.y,
-            probabilities=probabilities,
-            qc_flags=np.array([e.qc_flags for e in dataset.entries]),
-        )
-    print(f"{len(dataset)} predictions written to {args.output}")
-    return 0
+    if best_state is None:
+        raise RuntimeError("training produced no checkpoint; did it run zero epochs?")
+    model.load_state_dict(best_state)
+    model.eval()
 
-
-def cmd_report(args: argparse.Namespace) -> int:
-    """Build the report tables from saved predictions."""
-    from sleepstatelab.evaluation.metrics import evaluate_predictions
-    from sleepstatelab.evaluation.report import build_report
-
-    results = evaluate_predictions(args.predictions, split_part=args.part)
-    for result in results:
-        print(result.summary())
-    text = build_report(args.predictions, split_part=args.part, title=args.title)
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.output).write_text(text)
-    if args.json:
-        Path(args.json).write_text(
-            json.dumps([r.to_dict() for r in results], indent=2, default=str)
-        )
-    print(f"\nreport written to {args.output}")
-    return 0
-
-
-def cmd_smoke(args: argparse.Namespace) -> int:
-    """The synthetic end-to-end run: no recordings, CPU only."""
-    from sleepstatelab.smoke import run_smoke
-
-    return run_smoke(out_dir=args.out_dir, device=args.device, quick=not args.full)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="sleepstatelab",
-        description=(
-            "SleepStateLab: self-supervised EEG representation learning and "
-            "sleep-state decoding. Every subcommand is a wrapper over an "
-            "importable module."
-        ),
+    checkpoint = Checkpoint(
+        format=CHECKPOINT_FORMAT,
+        model_name=model_name,
+        state_dict=dict(best_state),
+        encoder_kwargs=encoder_kwargs(config),
+        temporal_kwargs=dict(temporal_kwargs),
+        n_classes=config.model.n_classes,
+        dropout=config.model.dropout,
+        label_order=STAGES,
+        channels=tuple(config.data.channels),
+        preprocessing_id=config.preprocessing_identity,
+        normalization=asdict(train.stats),
+        split_id=split.identity,
+        split_name=split.name,
+        train_participants=train.participants,
+        val_participants=val.participants,
+        test_participants=tuple(split.test),
+        seed=config.train.seed,
+        code_revision=code_revision(),
+        config_id=config.identity,
+        config=config.to_dict(),
+        epoch_selected=best_epoch,
+        val_metric_name="participant_macro_f1",
+        val_metric_value=best_score,
+        history=history.rows,
+        notes={
+            "run_id": run_id,
+            "device": device,
+            "n_parameters": model.n_parameters(),
+            "context_epochs": temporal_kwargs.get("context"),
+            "context_coverage": (
+                train.context_coverage() if hasattr(train, "context_coverage") else None
+            ),
+            "train_epochs_available": len(train),
+            "truncated_batches_per_epoch": config.train.max_train_batches or None,
+            "loader_batch_size": loader_batch_size or config.train.batch_size,
+            "examples_per_step": config.train.batch_size,
+        },
     )
-    parser.add_argument("--version", action="version", version=f"sleepstatelab {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    def common(sub: argparse.ArgumentParser) -> None:
-        sub.add_argument("--config", help="path to a YAML configuration file")
-        sub.add_argument("--data-root", help="override the configured data root")
-        sub.add_argument("--cache-dir", help="override the configured epoch cache")
-        sub.add_argument("--participants", nargs="*", help="restrict to these participants")
-
-    doctor = subparsers.add_parser("doctor", help="what this machine can run")
-    doctor.add_argument("--device", default="auto")
-    doctor.set_defaults(func=cmd_doctor)
-
-    audit = subparsers.add_parser("audit", help="discover recordings and write the manifest")
-    common(audit)
-    audit.add_argument("--checksums", help="path to a PhysioNet SHA256SUMS.txt")
-    audit.add_argument("--no-checksums", action="store_true", help="skip hashing the files")
-    audit.add_argument("--output", default="outputs/manifest.json")
-    audit.set_defaults(func=cmd_audit)
-
-    prepare = subparsers.add_parser("prepare", help="epoch every recording into the cache")
-    common(prepare)
-    prepare.add_argument("--force", action="store_true", help="re-epoch even if cached")
-    prepare.set_defaults(func=cmd_prepare)
-
-    report_one = subparsers.add_parser(
-        "audit-report", help="the single-recording audit, with figures"
-    )
-    common(report_one)
-    report_one.add_argument("--recording", help="recording id, default the first found")
-    report_one.add_argument("--checksums", help="path to a PhysioNet SHA256SUMS.txt")
-    report_one.add_argument("--out-dir", default="outputs/audit")
-    report_one.set_defaults(func=cmd_audit_report)
-
-    split = subparsers.add_parser("split", help="generate the participant-disjoint split")
-    common(split)
-    split.add_argument("--name", default="dev")
-    split.add_argument("--output", default="outputs/split.json")
-    split.set_defaults(func=cmd_split)
-
-    baselines = subparsers.add_parser("baselines", help="fit and score the classical baselines")
-    common(baselines)
-    baselines.add_argument("--split", required=True)
-    baselines.add_argument("--part", default="test", choices=("train", "val", "test"))
-    baselines.add_argument("--output", default="outputs/predictions_baselines.csv")
-    baselines.add_argument("--run-id")
-    baselines.set_defaults(func=cmd_baselines)
-
-    train = subparsers.add_parser("train-d1", help="train the epoch CNN")
-    common(train)
-    train.add_argument("--split", required=True)
-    train.add_argument("--checkpoint", default="runs/d1/checkpoint.pt")
-    train.add_argument("--device", default=None, help="cpu, cuda, mps or auto")
-    train.add_argument("--epochs", type=int)
-    train.add_argument("--seed", type=int)
-    train.add_argument("--run-id")
-    train.add_argument(
-        "--label-budget",
-        type=float,
-        help="train on a nested subset of the training participants (0-1]",
-    )
-    train.set_defaults(func=cmd_train_d1)
-
-    train2 = subparsers.add_parser(
-        "train-d2", help="train the temporal model over eleven epochs (offline)"
-    )
-    common(train2)
-    train2.add_argument("--split", required=True)
-    train2.add_argument("--checkpoint", default="runs/d2/checkpoint.pt")
-    train2.add_argument("--device", default=None, help="cpu, cuda, mps or auto")
-    train2.add_argument("--epochs", type=int)
-    train2.add_argument("--seed", type=int)
-    train2.add_argument("--run-id")
-    train2.add_argument(
-        "--init-encoder",
-        help="checkpoint whose encoder initialises this one (the route D3 uses)",
-    )
-    train2.add_argument(
-        "--label-budget",
-        type=float,
-        help="train on a nested subset of the training participants (0-1]",
-    )
-    train2.set_defaults(func=cmd_train_d2)
-
-    predict_cmd = subparsers.add_parser("predict", help="save one prediction row per epoch")
-    common(predict_cmd)
-    predict_cmd.add_argument("--split", required=True)
-    predict_cmd.add_argument("--checkpoint", required=True)
-    predict_cmd.add_argument("--part", default="test", choices=("train", "val", "test"))
-    predict_cmd.add_argument("--output", default="outputs/predictions_d1.csv")
-    predict_cmd.add_argument("--model-name", default="D1")
-    predict_cmd.add_argument("--device", default=None)
-    predict_cmd.add_argument("--append", action="store_true")
-    predict_cmd.add_argument(
-        "--shuffle-context",
-        action="store_true",
-        help="control: shuffle the non-central context positions before predicting",
-    )
-    predict_cmd.add_argument("--shuffle-seed", type=int, default=0)
-    predict_cmd.set_defaults(func=cmd_predict)
-
-    report = subparsers.add_parser("report", help="build tables from saved predictions")
-    report.add_argument("predictions")
-    report.add_argument("--part", default="test")
-    report.add_argument("--output", default="outputs/report.md")
-    report.add_argument("--json", help="also write the metrics as JSON")
-    report.add_argument("--title", default="Results")
-    report.set_defaults(func=cmd_report)
-
-    smoke = subparsers.add_parser("smoke", help="synthetic end-to-end run, no recordings")
-    smoke.add_argument("--out-dir", default="outputs/smoke")
-    smoke.add_argument("--device", default="cpu")
-    smoke.add_argument("--full", action="store_true", help="more epochs, still synthetic")
-    smoke.set_defaults(func=cmd_smoke)
-
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    return int(args.func(args) or 0)
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    if checkpoint_path is not None:
+        save_checkpoint(checkpoint_path, checkpoint)
+    return model, checkpoint, history
