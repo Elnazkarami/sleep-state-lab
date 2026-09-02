@@ -44,6 +44,10 @@ model:
   embedding_dim: 128
   dropout: 0.3
   n_classes: 5
+  context_epochs: 11          # D2 only: 5 before, centre, 5 after
+  temporal_layers: 2
+  temporal_heads: 4
+  temporal_dropout: 0.1
 
 train:
   device: cpu

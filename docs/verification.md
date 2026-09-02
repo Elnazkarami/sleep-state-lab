@@ -82,6 +82,40 @@ would need recordings can never be confused:
 | no BatchNorm anywhere | `test_models.py::test_batchnorm_is_not_used` |
 | **D1 overfits a tiny synthetic batch**: loss → <0.05, accuracy 1.000 | `test_models.py::test_d1_can_overfit_a_tiny_batch` |
 
+## D2: windows, masking and the temporal stack
+
+| what is asserted | test |
+| --- | --- |
+| an excluded epoch is masked in every window that would contain it, never bridged | `test_d2.py::test_a_gap_is_masked_not_bridged` |
+| a recording boundary is masked the same way as a gap | `test_d2.py::test_a_boundary_is_masked_the_same_way_as_a_gap` |
+| every present position sits at exactly the expected distance from the centre | `test_d2.py::test_every_present_position_is_at_exactly_the_expected_distance` |
+| the centre of a window is always present | `test_d2.py::test_the_centre_is_always_present` |
+| an even context is refused, in the planner and in the model | `test_d2.py::test_even_context_is_refused`, `::test_even_context_model_is_refused` |
+| with every neighbour masked, changing them does not move the logits at all | `test_d2.py::test_only_the_central_epoch_decides_when_context_is_absent` |
+| with neighbours present, changing them does | `test_d2.py::test_a_present_neighbour_does_change_the_answer` |
+| a window with a masked centre is refused | `test_d2.py::test_a_masked_centre_is_refused` |
+| D2 reuses D1's encoder object and produces identical embeddings from it | `test_d2.py::test_d2_reuses_the_d1_encoder_unchanged` |
+| the pre-computed-embedding path equals the full forward path | `test_d2.py::test_the_two_inference_paths_agree` |
+| windows never cross a recording or a participant | `test_d2.py::test_windows_never_cross_a_recording_or_participant` |
+| every dataset mask agrees with the stored epoch indices, position by position | `test_d2.py::test_dataset_masks_match_the_stored_epoch_indices` |
+| an absent position is zero in the tensor and false in the mask | `test_d2.py::test_absent_positions_are_zero_and_flagged` |
+| genuine-neighbour coverage is computed and in range | `test_d2.py::test_context_coverage_is_reported_and_sane` |
+| **D1 and D2 get identical class counts and class weights** | `test_d2.py::test_class_weights_match_the_epoch_dataset` |
+| the shuffled-neighbour control keeps the centre and the amount of context | `test_d2.py::test_shuffling_context_keeps_the_centre_and_the_amount_of_context` |
+| **D2 overfits a tiny batch**: accuracy 1.000, loss < 0.05 | `test_d2.py::test_d2_can_overfit_a_tiny_batch` |
+
+## The repository contains what it claims to
+
+| what is asserted | test |
+| --- | --- |
+| no source file is git-ignored | `test_packaging.py::test_no_source_file_is_git_ignored` |
+| every subpackage imports | `test_packaging.py::test_every_subpackage_is_importable` |
+
+These exist because of a real failure: a `.gitignore` line reading `data/` also
+matched `src/sleepstatelab/data/`, so ten modules were pushed missing and the
+linter — which honours `.gitignore` — was skipping the same directory, hiding
+nine errors in them.
+
 ## Checkpoints
 
 | what is asserted | test |
@@ -90,6 +124,7 @@ would need recordings can never be confused:
 | a reloaded model predicts identically to the one that was saved | same test |
 | loading refuses a different channel order | `test_pipeline.py::test_checkpoint_refuses_a_different_channel_order` |
 | loading refuses a different preprocessing identity | same test |
+| a checkpoint records its architecture, so D1 and D2 rebuild correctly | `test_pipeline.py::test_train_checkpoint_reload_predict_and_score`, `test_d2.py` (via the smoke run) |
 | prediction uses the checkpoint's own normalisation, not a re-fitted one | `test_pipeline.py::test_prediction_uses_the_checkpoints_own_normalisation` |
 
 ## Metrics

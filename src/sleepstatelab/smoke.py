@@ -92,7 +92,8 @@ def run_smoke(*, out_dir: str | Path = "outputs/smoke", device: str = "cpu", qui
     from sleepstatelab.synthetic import make_cohort
     from sleepstatelab.training.checkpoint import load_checkpoint
     from sleepstatelab.training.dataset import build_datasets
-    from sleepstatelab.training.trainer import predict, train_d1
+    from sleepstatelab.training.trainer import predict, train_d1, train_d2
+    from sleepstatelab.training.windows import build_window_datasets, shuffle_context
 
     target = Path(out_dir)
     target.mkdir(parents=True, exist_ok=True)
@@ -158,6 +159,47 @@ def run_smoke(*, out_dir: str | Path = "outputs/smoke", device: str = "cpu", qui
         probabilities = predict(reloaded.to(resolved), test, device=resolved)
         print(f"6. checkpoint reloaded; split id round-trip {loaded.split_id == split.identity}")
 
+        # D2: the same encoder under a transformer over eleven epochs. Trained
+        # here only to show the temporal path runs end to end on a machine with
+        # no data; five passes over generated signals is not an experiment.
+        window_train, window_val, window_test, _ = build_window_datasets(
+            config, split, context=config.model.context_epochs
+        )
+        print(
+            f"6b. windows: train {len(window_train)} / val {len(window_val)} / "
+            f"test {len(window_test)}; genuine-neighbour coverage "
+            f"{window_train.context_coverage():.3f}"
+        )
+        _, d2_checkpoint, _ = train_d2(
+            config,
+            split,
+            window_train,
+            window_val,
+            device=resolved,
+            checkpoint_path=target / "d2_synthetic.pt",
+            run_id="synthetic-smoke-d2",
+            progress=True,
+        )
+        d2_model, d2_loaded = load_checkpoint(
+            target / "d2_synthetic.pt",
+            expect_channels=tuple(config.data.channels),
+            expect_preprocessing_id=config.preprocessing_identity,
+        )
+        d2_probabilities = predict(d2_model.to(resolved), window_test, device=resolved)
+        print(
+            f"6c. D2 trained and reloaded: {d2_checkpoint.notes['n_parameters']}; "
+            f"context {d2_loaded.temporal_kwargs.get('context')} epochs"
+        )
+
+        # The control that says whether the context is being used at all.
+        shuffle_context(window_test, seed=1)
+        shuffled_probabilities = predict(d2_model, window_test, device=resolved)
+        moved = float(np.mean(np.abs(d2_probabilities - shuffled_probabilities)))
+        print(
+            f"6d. shuffled-neighbour control: mean absolute change in probability "
+            f"{moved:.4f}"
+        )
+
         reject = reject_mask_flags(tuple(config.preprocess.qc_reject))
 
         def features_for(participants: set[str]) -> np.ndarray:
@@ -192,6 +234,19 @@ def run_smoke(*, out_dir: str | Path = "outputs/smoke", device: str = "cpu", qui
                 true_labels=test.y,
                 probabilities=probabilities,
                 qc_flags=np.array([e.qc_flags for e in test.entries]),
+            )
+            writer.write(
+                run_id="synthetic-smoke",
+                model="D2",
+                split_id=split.identity,
+                split_part="test",
+                seed=config.train.seed,
+                participant_ids=[e.participant_id for e in window_test.entries],
+                recording_ids=[e.recording_id for e in window_test.entries],
+                epoch_indices=np.array([e.epoch_index for e in window_test.entries]),
+                true_labels=window_test.y,
+                probabilities=d2_probabilities,
+                qc_flags=np.array([e.qc_flags for e in window_test.entries]),
             )
             for name, block in baselines.items():
                 writer.write(

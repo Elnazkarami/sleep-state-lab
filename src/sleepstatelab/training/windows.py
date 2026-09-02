@@ -1,0 +1,273 @@
+"""Context windows: eleven epochs around one labelled centre, and what is missing.
+
+Every rule that keeps D2 honest is enforced here rather than in the model, so
+that a window handed to a model is already correct by construction.
+
+* **A window never leaves its recording.** Offsets are resolved inside one
+  recording's epoch index, so a window cannot reach into the next night, and
+  certainly not into another participant.
+* **A neighbour must be at exactly the expected index.** Position ``k`` of a
+  window centred on epoch ``i`` is the epoch whose *original* index is
+  ``i + k - 5``. If that epoch was excluded -- unscored, movement time, rejected
+  by quality control -- there is no neighbour there, and the position is marked
+  absent. The nearest surviving epoch is never substituted: it is a different
+  point in the night, and using it would fabricate continuity across the gap.
+* **A boundary is an absence, not a zero.** The first epoch of a recording has
+  five absent positions before it, marked the same way as a gap.
+* **The centre is always real.** Windows are built only around eligible,
+  labelled epochs.
+
+The signal for an absent position is left as zeros in the returned tensor and
+the model is told, through the mask, not to look at it: the model replaces those
+positions with a learned token before attention, so nothing downstream ever
+treats a zero epoch as a measurement.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+
+from sleepstatelab.config import Config
+from sleepstatelab.data.epochs import EpochedRecording
+from sleepstatelab.data.prepare import load_cached, reject_mask_flags
+from sleepstatelab.data.preprocess import NormalizationStats, bandpass, fit_normalization
+from sleepstatelab.data.splits import Split
+from sleepstatelab.labels import STAGES
+from sleepstatelab.training.dataset import EpochIndexEntry, class_weights_from_counts
+
+
+@dataclass(frozen=True, slots=True)
+class WindowPlan:
+    """Which stored rows fill a window, and which positions have nobody.
+
+    ``rows`` holds an index into the recording's epoch array for every present
+    position and ``-1`` for an absent one; ``mask`` is the same information as a
+    boolean. Both are kept because the first is what gathers the signal and the
+    second is what the model is told.
+    """
+
+    recording: int
+    centre_row: int
+    rows: np.ndarray
+    mask: np.ndarray
+
+
+def plan_windows(epoch_index: np.ndarray, context: int) -> tuple[np.ndarray, np.ndarray]:
+    """For every stored epoch, the rows of its neighbours and which exist.
+
+    ``epoch_index`` is one recording's original epoch indices, ascending and not
+    necessarily contiguous. Returns ``rows`` and ``mask``, both
+    ``[n_epochs, context]``.
+
+    Resolution is by index lookup rather than by walking the array, so an epoch
+    that is *stored* but is not at the expected distance is correctly treated as
+    no neighbour at all.
+    """
+    if context % 2 == 0:
+        raise ValueError(f"context must be odd, got {context}")
+    half = context // 2
+    n = int(epoch_index.size)
+    rows = np.full((n, context), -1, dtype=np.int64)
+    mask = np.zeros((n, context), dtype=bool)
+
+    # A map from original epoch index to the row that holds it. Built once per
+    # recording; the alternative, searching the index array per window, is the
+    # same answer computed n times.
+    where = {int(value): row for row, value in enumerate(epoch_index)}
+    for row, centre in enumerate(epoch_index.tolist()):
+        for position in range(context):
+            wanted = int(centre) + position - half
+            found = where.get(wanted)
+            if found is None:
+                continue
+            rows[row, position] = found
+            mask[row, position] = True
+    return rows, mask
+
+
+class ContextWindowDataset(Dataset):
+    """Windows of ``context`` epochs, labelled by the stage of the centre."""
+
+    def __init__(
+        self,
+        recordings: list[EpochedRecording],
+        *,
+        config: Config,
+        stats: NormalizationStats,
+        reject_flags: int,
+        context: int = 11,
+    ) -> None:
+        self.config = config
+        self.stats = stats
+        self.context = context
+        self.blocks: list[np.ndarray] = []
+        self.labels: list[np.ndarray] = []
+        self.rows: list[np.ndarray] = []
+        self.masks: list[np.ndarray] = []
+        self.entries: list[EpochIndexEntry] = []
+        self.index: list[tuple[int, int]] = []
+        """One entry per window: which recording, and which row is its centre."""
+
+        for record in recordings:
+            keep = record.eligible(reject_flags)
+            if not keep.any():
+                continue
+            signals = bandpass(record.signals[keep], record.sampling_rate_hz, config.preprocess)
+            block = stats.apply(signals)
+            epoch_index = record.epoch_index[keep]
+            qc = record.qc[keep]
+            rows, mask = plan_windows(epoch_index, context)
+
+            recording_id = len(self.blocks)
+            self.blocks.append(block)
+            self.labels.append(record.labels[keep].astype(np.int64))
+            self.rows.append(rows)
+            self.masks.append(mask)
+            for row in range(int(epoch_index.size)):
+                self.index.append((recording_id, row))
+                self.entries.append(
+                    EpochIndexEntry(
+                        participant_id=record.participant_id,
+                        recording_id=record.recording_id,
+                        epoch_index=int(epoch_index[row]),
+                        qc_flags=int(qc[row]),
+                    )
+                )
+        if not self.index:
+            raise ValueError("no eligible epochs in these recordings")
+
+        # Ordered by recording and then by row, which is exactly the order of
+        # ``self.index``: a window's label is ``self.y[i]``.
+        self.y = np.concatenate(self.labels)
+
+    def __len__(self) -> int:
+        return len(self.index)
+
+    def __getitem__(self, item: int) -> tuple[torch.Tensor, torch.Tensor, int]:
+        recording, row = self.index[item]
+        block = self.blocks[recording]
+        rows = self.rows[recording][row]
+        mask = self.masks[recording][row]
+
+        window = np.zeros((self.context, *block.shape[1:]), dtype=np.float32)
+        present = rows >= 0
+        window[present] = block[rows[present]]
+        return (
+            torch.from_numpy(window),
+            torch.from_numpy(mask.copy()),
+            int(self.labels[recording][row]),
+        )
+
+    @property
+    def participants(self) -> tuple[str, ...]:
+        return tuple(sorted({e.participant_id for e in self.entries}))
+
+    def class_counts(self) -> np.ndarray:
+        return np.array(
+            [np.count_nonzero(self.y == index) for index in range(len(STAGES))],
+            dtype=np.int64,
+        )
+
+    def class_weights(self, scheme: str = "inverse_frequency") -> np.ndarray:
+        """Identical to the epoch dataset's, so D1 and D2 are weighted the same."""
+        return class_weights_from_counts(self.class_counts(), scheme)
+
+    def context_coverage(self) -> float:
+        """Share of context positions that are genuine neighbours.
+
+        Reported with any D2 result: a dataset where a third of the context is
+        absent is a different experiment from one where almost none is, and the
+        number says which.
+        """
+        total = sum(int(mask.size) for mask in self.masks)
+        present = sum(int(np.count_nonzero(mask)) for mask in self.masks)
+        return present / total if total else 0.0
+
+
+def build_window_datasets(
+    config: Config,
+    split: Split,
+    *,
+    context: int = 11,
+    train_participants: tuple[str, ...] | None = None,
+    stats: NormalizationStats | None = None,
+) -> tuple[ContextWindowDataset, ContextWindowDataset, ContextWindowDataset, NormalizationStats]:
+    """Train, validation and test window datasets, fitted on training only.
+
+    The same contract as ``build_datasets``: statistics come from the training
+    participants a run actually has, and inference supplies the statistics the
+    checkpoint was trained under rather than fitting new ones.
+    """
+    reject = reject_mask_flags(tuple(config.preprocess.qc_reject))
+    train_ids = tuple(train_participants) if train_participants else split.train
+    unexpected = set(train_ids) - set(split.train)
+    if unexpected:
+        raise ValueError(
+            f"{sorted(unexpected)} are not training participants of split {split.name!r}"
+        )
+
+    train_records = load_cached(config, train_ids)
+    val_records = load_cached(config, split.val) if split.val else []
+    test_records = load_cached(config, split.test)
+    if not val_records:
+        raise ValueError(
+            f"split {split.name!r} has no validation participants; checkpoint "
+            "selection would have nothing to select on"
+        )
+
+    if stats is None:
+        filtered = []
+        participants = []
+        for record in train_records:
+            keep = record.eligible(reject)
+            if keep.any():
+                filtered.append(
+                    bandpass(record.signals[keep], record.sampling_rate_hz, config.preprocess)
+                )
+                participants.append(record.participant_id)
+        stats = fit_normalization(
+            filtered,
+            participants,
+            channels=tuple(config.data.channels),
+            config=config.preprocess,
+            seed=config.split.seed,
+        )
+
+    def build(records: list[EpochedRecording]) -> ContextWindowDataset:
+        return ContextWindowDataset(
+            records,
+            config=config,
+            stats=stats,
+            reject_flags=reject,
+            context=context,
+        )
+
+    return build(train_records), build(val_records), build(test_records), stats
+
+
+def shuffle_context(dataset: ContextWindowDataset, *, seed: int = 0) -> None:
+    """Shuffle the non-central positions of every window, in place.
+
+    A control, not an augmentation. If a temporal model scores as well with its
+    neighbours in a random order as with them in the right one, then whatever it
+    gained over a single-epoch model is not temporal structure -- it is the
+    extra parameters, or the fact that it saw eleven epochs' worth of signal at
+    all. The central position is left exactly where it is, so the model is still
+    being asked about the same epoch.
+
+    Presence is shuffled with the signal: a position that had no neighbour keeps
+    its absence, so the amount of real context is unchanged and only its order
+    is destroyed.
+    """
+    rng = np.random.default_rng(seed)
+    centre = dataset.context // 2
+    others = np.array([i for i in range(dataset.context) if i != centre])
+    for rows, mask in zip(dataset.rows, dataset.masks, strict=True):
+        for window in range(rows.shape[0]):
+            order = rng.permutation(others)
+            rows[window, others] = rows[window, order]
+            mask[window, others] = mask[window, order]

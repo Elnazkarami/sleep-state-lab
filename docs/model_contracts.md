@@ -1,16 +1,18 @@
-# Model contracts: D1 implemented, D2 and D3 specified
+# Model contracts: D1 and D2 implemented, D3 specified
 
 **Status, stated once and not softened anywhere else in this repository:**
 
 | | status |
 | --- | --- |
 | D1 — epoch CNN | **implemented and trained** (synthetic and a six-participant real pilot) |
-| D2 — temporal transformer over 11 epochs | **specified below; not implemented** |
+| D2 — temporal transformer over 11 epochs | **implemented and trained** (synthetic and the same pilot) |
 | D3 — D2 with a self-supervised pretrained encoder | **specified below; not implemented** |
 | the label-budget benchmark | **not run** |
+| the required controls | **one of six implemented** (shuffled neighbours); the rest are listed below and not run |
 
-No checkpoint, score, or conclusion for D2 or D3 exists. Nothing in this
-repository should be read as reporting one.
+No checkpoint, score, or conclusion for D3 exists, and the D1-versus-D2 pilot
+numbers are not a comparison — the two were not given matched compute, which the
+results section states wherever they appear.
 
 ---
 
@@ -40,7 +42,15 @@ rather than initialisation.
 
 ---
 
-## D2 — temporal context (specified, not implemented)
+## D2 — temporal context (implemented)
+
+Implemented in `sleepstatelab.models.d2` with its windows built by
+`sleepstatelab.training.windows`. What follows was the contract; it is now also
+the description of what the code does, and `tests/test_d2.py` asserts each of
+the rules below rather than trusting this page.
+
+**Parameter count: 756,229** — 488,832 in the encoder (bit-for-bit D1's),
+266,752 in the temporal stack, 645 in the head.
 
 **Architecture.** The D1 epoch encoder applied to each of 11 consecutive epochs
 — five before, the central epoch, five after — producing 11 epoch embeddings,
@@ -69,7 +79,25 @@ would be unfair in D2's favour.
 **Training.** Identical supervised settings to D1 — same loss, same class
 weighting from training participants only, same optimiser, same stopping rule on
 validation participant macro-F1 — so that D2 minus D1 is temporal context and
-nothing else.
+nothing else. This is enforced rather than intended: both models are trained by
+the same `train_supervised` routine, and both take their class weights from
+`class_weights_from_counts`, with a test asserting the two datasets produce
+identical weights.
+
+**What is implemented and what that leaves.** The model, the windowing, the
+masking, training, checkpointing, prediction and the shuffled-neighbour control
+all run, on synthetic data and on the six-participant pilot. What has *not* been
+done is a comparison: on the pilot, D1 was given 20 passes over the training set
+and D2 six, because a D2 pass costs about eleven times a D1 pass on a CPU. Those
+two numbers are not compute-matched and are not a measurement of what temporal
+context is worth.
+
+**A known inefficiency, stated so nobody has to discover it.** Training encodes
+all eleven epochs of every window, so an epoch is encoded up to eleven times per
+pass. `D2Classifier.classify` accepts pre-computed embeddings and a test asserts
+it agrees with the full path to float tolerance, so a recording-level inference
+path that encodes each epoch once is available and correct; wiring it into
+training is the obvious next optimisation and has not been done.
 
 ---
 
@@ -123,6 +151,12 @@ benchmark is run.
 
 Each of these exists to close a specific alternative explanation.
 
+0. **Shuffled neighbours** — *implemented*: `sleepstatelab predict
+   --shuffle-context` permutes the non-central positions of every window,
+   keeping the centre and the amount of real context fixed, and writes its
+   predictions under a separate model name. If a temporal model scores as well
+   with its neighbours in a random order, whatever it gained was not temporal
+   structure.
 1. **Pretrained epoch CNN without temporal context** — is the gain from the
    representation, or only from having a transformer?
 2. **Frozen random versus frozen pretrained encoder, same probe** — does the
@@ -132,10 +166,7 @@ Each of these exists to close a specific alternative explanation.
 4. **D1 plus a training-fitted temporal smoothing baseline** — how much of the
    context benefit is available from a transition-probability smoother fitted on
    training participants? This is often most of it.
-5. **Shuffled-neighbour controls** — shuffle the context epochs within a window.
-   If performance holds up, the model is not using temporal structure and the
-   "context" story is wrong.
-6. **One-channel models** — trained *with* one channel, kept strictly distinct
+5. **One-channel models** — trained *with* one channel, kept strictly distinct
    from a two-channel model that loses a channel at inference. These are
    different questions and reporting them together would confuse a robustness
    claim with a design claim.

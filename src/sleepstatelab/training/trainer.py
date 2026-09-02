@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from sleepstatelab.config import Config
 from sleepstatelab.data.splits import Split
@@ -32,7 +33,6 @@ from sleepstatelab.models.d1 import D1Classifier
 from sleepstatelab.models.encoder import EpochEncoder
 from sleepstatelab.provenance import code_revision
 from sleepstatelab.training.checkpoint import CHECKPOINT_FORMAT, Checkpoint, save_checkpoint
-from sleepstatelab.training.dataset import EpochDataset
 
 
 def seed_everything(seed: int) -> None:
@@ -78,21 +78,38 @@ def build_model(config: Config) -> D1Classifier:
     )
 
 
+def split_batch(batch: Sequence[Any], device: str) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """Separate a batch into the model's inputs and its targets.
+
+    D1's dataset yields ``(x, y)`` and D2's yields ``(x, mask, y)``. Rather than
+    two training loops that can drift apart -- and they would, which is exactly
+    what would make a D2-minus-D1 comparison meaningless -- the loop takes the
+    last element as the target and passes the rest to the model.
+    """
+    *inputs, targets = batch
+    return [tensor.to(device) for tensor in inputs], targets.to(device)
+
+
 @torch.no_grad()
 def predict(
-    model: nn.Module, dataset: EpochDataset, *, device: str, batch_size: int = 256
+    model: nn.Module,
+    dataset: Dataset,
+    *,
+    device: str,
+    batch_size: int = 256,
 ) -> np.ndarray:
     """Probabilities ``[n, 5]`` in stage order, in dataset order."""
     model.eval()
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     blocks: list[np.ndarray] = []
-    for x, _ in loader:
-        logits = model(x.to(device))
+    for batch in loader:
+        inputs, _ = split_batch(batch, device)
+        logits = model(*inputs)
         blocks.append(torch.softmax(logits, dim=1).cpu().numpy())
     return np.concatenate(blocks, axis=0) if blocks else np.empty((0, len(STAGES)))
 
 
-def participant_mean_macro_f1(dataset: EpochDataset, probabilities: np.ndarray) -> float:
+def participant_mean_macro_f1(dataset: Any, probabilities: np.ndarray) -> float:
     """The primary metric, computed on a dataset's own participant labels."""
     predicted = probabilities.argmax(axis=1)
     truth = dataset.y
@@ -109,17 +126,118 @@ def participant_mean_macro_f1(dataset: EpochDataset, probabilities: np.ndarray) 
 def train_d1(
     config: Config,
     split: Split,
-    train: EpochDataset,
-    val: EpochDataset,
+    train: Any,
+    val: Any,
     *,
     device: str = "cpu",
     checkpoint_path: Path | str | None = None,
     run_id: str = "d1",
     progress: bool = True,
-) -> tuple[D1Classifier, Checkpoint, TrainingHistory]:
+) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
     """Train D1, selecting on validation participant macro-F1."""
+    return train_supervised(
+        config,
+        split,
+        train,
+        val,
+        model=build_model(config),
+        model_name="D1",
+        temporal_kwargs={},
+        device=device,
+        checkpoint_path=checkpoint_path,
+        run_id=run_id,
+        progress=progress,
+    )
+
+
+def build_d2(config: Config, *, encoder: EpochEncoder | None = None) -> Any:
+    """D2 with a fresh or supplied encoder.
+
+    ``encoder`` is how a pretrained backbone enters the model, which is the
+    route D3 will take. Passing one that was built with different arguments than
+    the configuration asks for is refused, because the checkpoint would then
+    record a shape the weights do not have.
+    """
+    from sleepstatelab.models.d2 import D2Classifier
+
+    if encoder is None:
+        encoder = EpochEncoder(**encoder_kwargs(config))
+    elif encoder.embedding_dim != config.model.embedding_dim:
+        raise ValueError(
+            f"the supplied encoder has embedding dimension {encoder.embedding_dim}, "
+            f"the configuration asks for {config.model.embedding_dim}"
+        )
+    return D2Classifier.from_encoder(
+        encoder,
+        context=config.model.context_epochs,
+        n_layers=config.model.temporal_layers,
+        n_heads=config.model.temporal_heads,
+        n_classes=config.model.n_classes,
+        dropout=config.model.dropout,
+        transformer_dropout=config.model.temporal_dropout,
+    )
+
+
+def temporal_kwargs_of(config: Config) -> dict[str, Any]:
+    """What a D2 checkpoint has to record to be rebuildable."""
+    return {
+        "context": config.model.context_epochs,
+        "n_layers": config.model.temporal_layers,
+        "n_heads": config.model.temporal_heads,
+        "transformer_dropout": config.model.temporal_dropout,
+    }
+
+
+def train_d2(
+    config: Config,
+    split: Split,
+    train: Any,
+    val: Any,
+    *,
+    encoder: EpochEncoder | None = None,
+    device: str = "cpu",
+    checkpoint_path: Path | str | None = None,
+    run_id: str = "d2",
+    progress: bool = True,
+) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
+    """Train D2 under settings identical to D1's, which is the whole point."""
+    return train_supervised(
+        config,
+        split,
+        train,
+        val,
+        model=build_d2(config, encoder=encoder),
+        model_name="D2",
+        temporal_kwargs=temporal_kwargs_of(config),
+        device=device,
+        checkpoint_path=checkpoint_path,
+        run_id=run_id,
+        progress=progress,
+    )
+
+
+def train_supervised(
+    config: Config,
+    split: Split,
+    train: Any,
+    val: Any,
+    *,
+    model: nn.Module,
+    model_name: str,
+    temporal_kwargs: dict[str, Any],
+    device: str = "cpu",
+    checkpoint_path: Path | str | None = None,
+    run_id: str = "run",
+    progress: bool = True,
+) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
+    """The supervised loop, shared by every model this repository trains.
+
+    Shared deliberately. If D1 and D2 had a loop each, the two would drift --
+    a different schedule here, a different clipping threshold there -- and the
+    difference between their scores would stop being temporal context.
+    """
     seed_everything(config.train.seed)
-    model = build_model(config).to(device)
+    model = model.to(device)
 
     weights = torch.tensor(
         train.class_weights(config.train.class_weighting), dtype=torch.float32, device=device
@@ -152,19 +270,18 @@ def train_d1(
         started = time.time()
         total_loss = 0.0
         seen = 0
-        for batch, (x, y) in enumerate(loader):
+        for batch, items in enumerate(loader):
             if config.train.max_train_batches and batch >= config.train.max_train_batches:
                 break
-            x = x.to(device)
-            y = y.to(device)
+            inputs, targets = split_batch(items, device)
             optimiser.zero_grad(set_to_none=True)
-            loss = criterion(model(x), y)
+            loss = criterion(model(*inputs), targets)
             loss.backward()
             if config.train.grad_clip > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), config.train.grad_clip)
             optimiser.step()
-            total_loss += float(loss.item()) * x.shape[0]
-            seen += int(x.shape[0])
+            total_loss += float(loss.item()) * inputs[0].shape[0]
+            seen += int(inputs[0].shape[0])
         scheduler.step()
 
         val_probabilities = predict(model, val, device=device)
@@ -207,9 +324,10 @@ def train_d1(
 
     checkpoint = Checkpoint(
         format=CHECKPOINT_FORMAT,
-        model_name="D1",
+        model_name=model_name,
         state_dict=dict(best_state),
         encoder_kwargs=encoder_kwargs(config),
+        temporal_kwargs=dict(temporal_kwargs),
         n_classes=config.model.n_classes,
         dropout=config.model.dropout,
         label_order=STAGES,
@@ -233,6 +351,10 @@ def train_d1(
             "run_id": run_id,
             "device": device,
             "n_parameters": model.n_parameters(),
+            "context_epochs": temporal_kwargs.get("context"),
+            "context_coverage": (
+                train.context_coverage() if hasattr(train, "context_coverage") else None
+            ),
             "train_epochs_available": len(train),
             "truncated_batches_per_epoch": config.train.max_train_batches or None,
         },

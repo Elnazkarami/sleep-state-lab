@@ -39,6 +39,30 @@ class EpochIndexEntry:
     qc_flags: int
 
 
+def class_weights_from_counts(counts: np.ndarray, scheme: str) -> np.ndarray:
+    """Inverse-frequency loss weights, normalised to a mean of one.
+
+    Shared by the epoch dataset and the context-window dataset so that D1 and D2
+    are weighted identically -- if they were not, the difference between them
+    would include the loss, and the comparison would be about something else.
+
+    Normalised to a mean of one so the loss magnitude does not move with the
+    class balance, and a class absent from training gets a weight of one rather
+    than an infinity.
+    """
+    if scheme == "none":
+        return np.ones(len(STAGES), dtype=np.float64)
+    if scheme != "inverse_frequency":
+        raise ValueError(f"unknown class weighting {scheme!r}")
+    counts = np.asarray(counts, dtype=np.float64)
+    weights = np.where(counts > 0, counts.sum() / np.maximum(counts, 1.0), 1.0)
+    present = counts > 0
+    if present.any():
+        weights[present] /= weights[present].mean()
+    weights[~present] = 1.0
+    return weights
+
+
 class EpochDataset(Dataset):
     """Eligible epochs from a set of recordings, normalised and ready for a model."""
 
@@ -96,24 +120,8 @@ class EpochDataset(Dataset):
         )
 
     def class_weights(self, scheme: str = "inverse_frequency") -> np.ndarray:
-        """Loss weights from *this* dataset's class counts.
-
-        Only ever called on the training dataset. Inverse frequency, normalised
-        to a mean of one so the loss magnitude does not move with the class
-        balance; a class absent from training gets a weight of one rather than
-        an infinity.
-        """
-        if scheme == "none":
-            return np.ones(len(STAGES), dtype=np.float64)
-        if scheme != "inverse_frequency":
-            raise ValueError(f"unknown class weighting {scheme!r}")
-        counts = self.class_counts().astype(np.float64)
-        weights = np.where(counts > 0, counts.sum() / np.maximum(counts, 1.0), 1.0)
-        present = counts > 0
-        if present.any():
-            weights[present] /= weights[present].mean()
-        weights[~present] = 1.0
-        return weights
+        """Loss weights from *this* dataset's class counts. Training only."""
+        return class_weights_from_counts(self.class_counts(), scheme)
 
 
 def build_datasets(

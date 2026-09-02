@@ -16,12 +16,18 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from torch import nn
 
 from sleepstatelab.labels import STAGES
 from sleepstatelab.models.d1 import D1Classifier
 from sleepstatelab.models.encoder import EpochEncoder
 
-CHECKPOINT_FORMAT = "sleepstatelab-checkpoint-1.0"
+CHECKPOINT_FORMAT = "sleepstatelab-checkpoint-1.1"
+"""Version 1.1 adds ``temporal_kwargs`` and makes ``model_name`` load-bearing, so
+a file says which architecture to rebuild. Version 1.0 files still load: they
+predate D2 and are read as D1 with no temporal stack."""
+
+READABLE_FORMATS = ("sleepstatelab-checkpoint-1.0", CHECKPOINT_FORMAT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +38,10 @@ class Checkpoint:
     model_name: str
     state_dict: dict[str, Any]
     encoder_kwargs: dict[str, Any]
+    temporal_kwargs: dict[str, Any]
+    """D2's context length and transformer shape. Empty for a model that has no
+    temporal stack, which is how a loader tells the two apart."""
+
     n_classes: int
     dropout: float
     label_order: tuple[str, ...]
@@ -69,7 +79,7 @@ def load_checkpoint(
     *,
     expect_channels: tuple[str, ...] | None = None,
     expect_preprocessing_id: str | None = None,
-) -> tuple[D1Classifier, Checkpoint]:
+) -> tuple[nn.Module, Checkpoint]:
     """Rebuild a model from a checkpoint, refusing a mismatched contract."""
     payload = torch.load(Path(path), map_location="cpu", weights_only=False)
     missing = [
@@ -87,10 +97,10 @@ def load_checkpoint(
     ]
     if missing:
         raise ValueError(f"{path} is not a complete checkpoint; it is missing {missing}")
-    if payload["format"] != CHECKPOINT_FORMAT:
+    if payload["format"] not in READABLE_FORMATS:
         raise ValueError(
             f"{path} is format {payload['format']!r}, this package reads "
-            f"{CHECKPOINT_FORMAT!r}"
+            f"{READABLE_FORMATS}"
         )
     if tuple(payload["label_order"]) != STAGES:
         raise ValueError(
@@ -114,17 +124,30 @@ def load_checkpoint(
         )
 
     encoder = EpochEncoder(**payload["encoder_kwargs"])
-    model = D1Classifier.from_encoder(
-        encoder, n_classes=payload["n_classes"], dropout=payload["dropout"]
-    )
+    temporal = dict(payload.get("temporal_kwargs") or {})
+    model_name = payload.get("model_name", "D1")
+    if temporal:
+        from sleepstatelab.models.d2 import D2Classifier
+
+        model: nn.Module = D2Classifier.from_encoder(
+            encoder,
+            n_classes=payload["n_classes"],
+            dropout=payload["dropout"],
+            **temporal,
+        )
+    else:
+        model = D1Classifier.from_encoder(
+            encoder, n_classes=payload["n_classes"], dropout=payload["dropout"]
+        )
     model.load_state_dict(payload["state_dict"])
     model.eval()
 
     checkpoint = Checkpoint(
         format=payload["format"],
-        model_name=payload["model_name"],
+        model_name=model_name,
         state_dict=payload["state_dict"],
         encoder_kwargs=payload["encoder_kwargs"],
+        temporal_kwargs=temporal,
         n_classes=payload["n_classes"],
         dropout=payload["dropout"],
         label_order=tuple(payload["label_order"]),

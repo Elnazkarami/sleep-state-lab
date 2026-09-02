@@ -20,10 +20,12 @@ anywhere else in this document.
 | data audit, manifest, epoching, splits | **implemented**, executed on real recordings |
 | classical baselines (class prior, logistic regression, random forest) | **implemented**, executed on synthetic and real data |
 | D1 — trainable epoch CNN | **implemented**, executed on synthetic and real data |
+| D2 — temporal transformer over 11 epochs | **implemented**, executed on synthetic and real data |
+| shuffled-neighbour control | **implemented**, executed on real data |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
-| D2 — temporal transformer over 11 epochs | **specified only** ([contract](docs/model_contracts.md)) — not implemented |
-| D3 — D2 with a self-supervised pretrained encoder | **specified only** — not implemented |
+| D3 — D2 with a self-supervised pretrained encoder | **specified only** ([contract](docs/model_contracts.md)) — not implemented |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
+| the other five required controls | **not run** |
 | transition and single-channel analyses | **not run** |
 
 **Executed on real data so far: a six-participant pilot** — four training, one
@@ -32,6 +34,12 @@ and verified against the published checksums. A test estimate from one held-out
 person is one person's night. It shows the pipeline runs end to end on real
 recordings and produces coherent numbers. It is not a benchmark and no
 generalisation claim is made from it.
+
+**D1 and D2 have not been compared.** On the pilot D1 was given 20 passes over
+the training set and D2 six, because one D2 pass costs about eleven times one D1
+pass on a CPU. Their scores appear in the same table because they were produced
+from the same saved predictions; they are not compute-matched and the difference
+between them measures nothing.
 
 There are no pretrained checkpoints, no benchmark results, and no scientific
 conclusions in this repository.
@@ -134,6 +142,22 @@ sleepstatelab train-d1 --config configs/pilot.yaml --data-root $D --cache-dir $D
 sleepstatelab predict --config configs/pilot.yaml --data-root $D --cache-dir $D/cache \
                       --split outputs/split.json --checkpoint runs/d1_pilot/checkpoint.pt \
                       --part test --output outputs/predictions_pilot.csv --append
+
+# 7b. D2: the same encoder under a transformer over eleven epochs (offline)
+sleepstatelab train-d2 --config configs/pilot.yaml --data-root $D --cache-dir $D/cache \
+                      --split outputs/split.json --device cpu --epochs 6 \
+                      --checkpoint runs/d2_pilot/checkpoint.pt
+sleepstatelab predict --config configs/pilot.yaml --data-root $D --cache-dir $D/cache \
+                      --split outputs/split.json --checkpoint runs/d2_pilot/checkpoint.pt \
+                      --part test --output outputs/predictions_pilot.csv \
+                      --model-name D2 --append
+
+# 7c. the control: same model, neighbours shuffled
+sleepstatelab predict --config configs/pilot.yaml --data-root $D --cache-dir $D/cache \
+                      --split outputs/split.json --checkpoint runs/d2_pilot/checkpoint.pt \
+                      --part test --output outputs/predictions_pilot.csv \
+                      --model-name D2-shuffled-context --append \
+                      --shuffle-context --shuffle-seed 1
 
 # 8. build the tables from the saved predictions
 sleepstatelab report  outputs/predictions_pilot.csv --part test \
@@ -270,6 +294,57 @@ configuration it is being loaded into.
 
 ---
 
+## D2 — temporal context
+
+The same encoder, applied to eleven consecutive epochs — five before, the
+central epoch, five after — then a two-layer transformer across those eleven
+embeddings, then the head on the **central position only**.
+
+**756,229 parameters**: 488,832 in the encoder, which is bit-for-bit D1's,
+266,752 in the temporal stack, 645 in the head. A test asserts that a D1 and a
+D2 built from the same encoder object share it and produce identical embeddings.
+
+**This is an offline model.** Predicting the middle of eleven epochs uses 2.5
+minutes of future signal. It is not a real-time scorer and comparing it against
+one would be unfair in D2's favour.
+
+**Masking is the part that has to be right**, and it lives in the dataset, not
+the model, so a window handed to a model is already correct:
+
+* a window never leaves its recording, so it can never reach into another night
+  or another participant;
+* position *k* of a window centred on epoch *i* is the epoch whose **original
+  index** is `i + k − 5`, or nothing at all. If that epoch was excluded, the
+  position is marked absent — the nearest surviving epoch is never substituted,
+  because it is a different point in the night;
+* the start and end of a recording are absences of the same kind, not zero
+  padding, which would teach the model that a boundary looks like a flat signal;
+* absent positions get a learned token *and* are excluded from attention;
+* the centre is always a real, eligible, labelled epoch, and the model raises if
+  it is ever handed a window whose centre is masked.
+
+Every one of those is a test in `tests/test_d2.py`, including the two that
+matter most: with all neighbours masked, changing them does not move the logits
+at all; with them present, it does.
+
+**Genuine-neighbour coverage** — the share of context positions that are real —
+is computed per dataset and reported with any D2 run. On the pilot it is 0.999,
+because these recordings have almost no excluded epochs; on a noisier cohort it
+would be lower and the number says so.
+
+D2 is trained by the same `train_supervised` routine as D1, with class weights
+from the same shared helper, so the two cannot drift apart in the ways that
+would make their difference mean something other than context.
+
+**Known inefficiency:** training encodes all eleven epochs of every window, so
+an epoch is encoded up to eleven times per pass. `D2Classifier.classify` takes
+pre-computed embeddings and is asserted to agree with the full path, so the
+eleven-times-cheaper recording-level path exists and is correct; wiring it into
+training is the next optimisation and has not been done. This is why the pilot
+gave D2 six passes to D1's twenty.
+
+---
+
 ## Evaluation
 
 **Primary metric: macro-F1 computed per participant, then averaged equally
@@ -391,10 +466,10 @@ $ ruff check src tests
 All checks passed!
 
 $ pytest -q
-67 passed in 78.50s
+88 passed in 113.61s
 ```
 
-All 67 tests run on generated signals and require no recordings. What each one
+All 88 tests run on generated signals and require no recordings. What each one
 asserts, and which failure it exists to catch, is tabulated in
 [docs/verification.md](docs/verification.md). The checks the brief calls for,
 and where they live:
@@ -408,6 +483,9 @@ and where they live:
 | gap handling | passed — excluded epochs leave visible index jumps; adjacency is decidable |
 | checkpoint round-trip | passed — reloaded model predicts identically; wrong channel order or preprocessing identity is refused |
 | metric calculation | passed — κ against a hand-worked example, absent-class rule both ways, participant-average vs pooled |
+| D2 masking | passed — gaps and boundaries masked not bridged, absent context provably ignored, present context provably used, centre always real |
+| D1/D2 comparability | passed — identical class counts and weights from a shared helper, one shared training routine |
+| the repository contains its own source | passed — no source file is git-ignored, every subpackage imports |
 
 ### Synthetic CPU smoke pipeline
 
@@ -472,10 +550,10 @@ src/sleepstatelab/
                     preprocessing, splits, cache preparation, audit report
   features/         spectral features (classical baselines only)
   baselines/        class prior, logistic regression, random forest
-  models/           the epoch encoder and D1
-  training/         dataset, trainer, checkpoints
+  models/           the epoch encoder, D1, and D2's temporal stack
+  training/         epoch dataset, context windows, trainer, checkpoints
   evaluation/       saved predictions, metrics, generated report tables
-tests/              66 tests: synthetic, real-data-free, CPU
+tests/              88 tests: synthetic, real-data-free, CPU
 docs/               data audit, model contracts, evaluation, PhysioML reuse
 ```
 

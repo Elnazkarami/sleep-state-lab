@@ -298,6 +298,104 @@ def cmd_train_d1(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_train_d2(args: argparse.Namespace) -> int:
+    """Train D2: the same encoder, with a transformer over eleven epochs."""
+    from sleepstatelab.data.splits import Split, label_budget_subsets
+    from sleepstatelab.provenance import make_run_provenance
+    from sleepstatelab.training.checkpoint import load_checkpoint
+    from sleepstatelab.training.trainer import train_d2
+    from sleepstatelab.training.windows import build_window_datasets
+
+    config = _with_overrides(load(args.config), args)
+    device = resolve(config.train.device)
+    split = Split.read(args.split)
+
+    budget_participants = None
+    if args.label_budget is not None:
+        budget_participants = label_budget_subsets(
+            split, (args.label_budget,), seed=config.split.seed
+        )[args.label_budget]
+        print(
+            f"label budget {args.label_budget:.0%}: training on "
+            f"{len(budget_participants)} of {len(split.train)} participants. "
+            "Validation labels are NOT reduced."
+        )
+
+    encoder = None
+    if args.init_encoder:
+        # The route a pretrained backbone takes into D2, and the one D3 will
+        # use. It is named in the checkpoint so a run started from a pretrained
+        # encoder can never be mistaken for one started from random weights.
+        source, source_checkpoint = load_checkpoint(
+            args.init_encoder,
+            expect_channels=tuple(config.data.channels),
+            expect_preprocessing_id=config.preprocessing_identity,
+        )
+        encoder = source.encoder
+        print(
+            f"encoder initialised from {args.init_encoder} "
+            f"({source_checkpoint.model_name}, run "
+            f"{source_checkpoint.notes.get('run_id', 'unknown')})"
+        )
+
+    train, val, test, stats = build_window_datasets(
+        config,
+        split,
+        context=config.model.context_epochs,
+        train_participants=budget_participants,
+    )
+    print(
+        f"train {len(train)} windows / {len(train.participants)} participants; "
+        f"val {len(val)} / {len(val.participants)}; "
+        f"test {len(test)} / {len(test.participants)}"
+    )
+    print(
+        f"context {config.model.context_epochs} epochs; genuine-neighbour "
+        f"coverage: train {train.context_coverage():.3f}, "
+        f"val {val.context_coverage():.3f}, test {test.context_coverage():.3f}"
+    )
+    print(f"normalization {stats.method} [{stats.identity}] fitted on {list(stats.fitted_on)}")
+    print(f"class counts (train): {dict(zip(STAGES, train.class_counts().tolist(), strict=True))}")
+    print(f"device: {device}")
+
+    run_id = args.run_id or f"d2-{split.identity}-s{config.train.seed}"
+    _, checkpoint, _ = train_d2(
+        config,
+        split,
+        train,
+        val,
+        encoder=encoder,
+        device=device,
+        checkpoint_path=args.checkpoint,
+        run_id=run_id,
+    )
+    print(
+        f"\nselected epoch {checkpoint.epoch_selected + 1} with validation "
+        f"participant macro-F1 {checkpoint.val_metric_value:.4f}"
+    )
+    print(f"parameters: {checkpoint.notes['n_parameters']}")
+    print(f"checkpoint written to {args.checkpoint}")
+    make_run_provenance(
+        run_id=run_id,
+        device=device,
+        seed=config.train.seed,
+        config=config.to_dict(),
+        split_id=split.identity,
+        channels=tuple(config.data.channels),
+        label_order=STAGES,
+        preprocessing_id=config.preprocessing_identity,
+        notes="D2 supervised training (offline: uses future context)",
+        extra={
+            "label_budget": args.label_budget,
+            "checkpoint": str(args.checkpoint),
+            "init_encoder": args.init_encoder,
+            "context_epochs": config.model.context_epochs,
+            "context_coverage_train": train.context_coverage(),
+        },
+    ).write(Path(args.checkpoint).with_suffix(".provenance.json"))
+    return 0
+
+
 def cmd_predict(args: argparse.Namespace) -> int:
     """Run a checkpoint over a split part and save one row per epoch."""
     from sleepstatelab.data.preprocess import NormalizationStats
@@ -340,8 +438,29 @@ def cmd_predict(args: argparse.Namespace) -> int:
             f"refusing to predict: the checkpoint's normalization was fitted on "
             f"test participants {sorted(leaked)}"
         )
-    train, val, test, _ = build_datasets(config, split, stats=stats)
+    if checkpoint.temporal_kwargs:
+        from sleepstatelab.training.windows import build_window_datasets
+
+        train, val, test, _ = build_window_datasets(
+            config,
+            split,
+            context=int(checkpoint.temporal_kwargs.get("context", 11)),
+            stats=stats,
+        )
+    else:
+        train, val, test, _ = build_datasets(config, split, stats=stats)
     dataset = {"train": train, "val": val, "test": test}[args.part]
+    if args.shuffle_context:
+        if not checkpoint.temporal_kwargs:
+            raise SystemExit("--shuffle-context only means something for a temporal model")
+        from sleepstatelab.training.windows import shuffle_context
+
+        shuffle_context(dataset, seed=args.shuffle_seed)
+        print(
+            f"CONTROL RUN: the non-central positions of every window have been "
+            f"shuffled with seed {args.shuffle_seed}. If the score holds up, the "
+            "model is not using temporal structure."
+        )
     probabilities = predict(model, dataset, device=device)
     with PredictionWriter(args.output, overwrite=not args.append) as writer:
         writer.write(
@@ -459,6 +578,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train.set_defaults(func=cmd_train_d1)
 
+    train2 = subparsers.add_parser(
+        "train-d2", help="train the temporal model over eleven epochs (offline)"
+    )
+    common(train2)
+    train2.add_argument("--split", required=True)
+    train2.add_argument("--checkpoint", default="runs/d2/checkpoint.pt")
+    train2.add_argument("--device", default=None, help="cpu, cuda, mps or auto")
+    train2.add_argument("--epochs", type=int)
+    train2.add_argument("--seed", type=int)
+    train2.add_argument("--run-id")
+    train2.add_argument(
+        "--init-encoder",
+        help="checkpoint whose encoder initialises this one (the route D3 uses)",
+    )
+    train2.add_argument(
+        "--label-budget",
+        type=float,
+        help="train on a nested subset of the training participants (0-1]",
+    )
+    train2.set_defaults(func=cmd_train_d2)
+
     predict_cmd = subparsers.add_parser("predict", help="save one prediction row per epoch")
     common(predict_cmd)
     predict_cmd.add_argument("--split", required=True)
@@ -468,6 +608,12 @@ def build_parser() -> argparse.ArgumentParser:
     predict_cmd.add_argument("--model-name", default="D1")
     predict_cmd.add_argument("--device", default=None)
     predict_cmd.add_argument("--append", action="store_true")
+    predict_cmd.add_argument(
+        "--shuffle-context",
+        action="store_true",
+        help="control: shuffle the non-central context positions before predicting",
+    )
+    predict_cmd.add_argument("--shuffle-seed", type=int, default=0)
     predict_cmd.set_defaults(func=cmd_predict)
 
     report = subparsers.add_parser("report", help="build tables from saved predictions")

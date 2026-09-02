@@ -140,6 +140,15 @@ class ModelConfig:
     dropout: float = 0.3
     n_classes: int = len(STAGES)
 
+    context_epochs: int = 11
+    """D2 only: how many epochs one prediction sees. Odd, so a centre exists.
+    Eleven is five before and five after -- 2.5 minutes of past and 2.5 minutes
+    of future, which is why D2 is an offline model."""
+
+    temporal_layers: int = 2
+    temporal_heads: int = 4
+    temporal_dropout: float = 0.1
+
 
 @dataclass(frozen=True, slots=True)
 class TrainConfig:
