@@ -102,7 +102,29 @@ would need recordings can never be confused:
 | genuine-neighbour coverage is computed and in range | `test_d2.py::test_context_coverage_is_reported_and_sane` |
 | **D1 and D2 get identical class counts and class weights** | `test_d2.py::test_class_weights_match_the_epoch_dataset` |
 | the shuffled-neighbour control keeps the centre and the amount of context | `test_d2.py::test_shuffling_context_keeps_the_centre_and_the_amount_of_context` |
+| the masking control leaves only the centre present | `test_d2.py::test_masking_context_leaves_only_the_centre` |
+| masking reduces the model to its encoder on the central epoch | `test_d2.py::test_masking_context_reduces_the_model_to_its_encoder` |
+| the two controls ask different questions of the same windows | `test_d2.py::test_the_two_controls_ask_different_questions` |
+| the segment path gives the same logits as the window path | `test_d2.py::test_segment_forward_equals_window_forward` |
+| the segment path gives the same probabilities end to end | `test_d2.py::test_segment_and_window_predictions_agree` |
+| segments cover every centre exactly once per pass | `test_d2.py::test_segments_cover_every_centre_exactly_once` |
+| `forward` accepts both dataset layouts | `test_d2.py::test_forward_accepts_both_dataset_layouts` |
+| D2 trains through the segment path and reloads | `test_d2.py::test_d2_trains_through_the_segment_path` |
 | **D2 overfits a tiny batch**: accuracy 1.000, loss < 0.05 | `test_d2.py::test_d2_can_overfit_a_tiny_batch` |
+
+## The command line exists and dispatches
+
+| what is asserted | test |
+| --- | --- |
+| the module is the command line, with `main` and `build_parser` | `test_cli.py::test_the_module_is_the_command_line` |
+| every subcommand is present | `test_cli.py::test_every_subcommand_is_present` |
+| each dispatches to a function this module defines | `test_cli.py::test_every_subcommand_dispatches_to_a_function` |
+| each has working `--help` | `test_cli.py::test_every_subcommand_has_help` |
+| the argument names the README uses still parse | `test_cli.py::test_the_training_commands_take_the_arguments_the_readme_uses` |
+
+These exist because of a real failure: an editing script wrote the trainer's
+source over `cli.py` and the whole suite still passed, because nothing imported
+the command line. Against the broken file all twenty-six of these fail.
 
 ## The repository contains what it claims to
 

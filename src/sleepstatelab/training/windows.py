@@ -261,28 +261,60 @@ def build_window_datasets(
     return build(train_records), build(val_records), build(test_records), stats
 
 
-def shuffle_context(dataset: ContextWindowDataset, *, seed: int = 0) -> None:
+def _windows_of(dataset: Any) -> ContextWindowDataset:
+    """The window dataset underneath, whichever wrapper is holding it."""
+    if isinstance(dataset, ContextWindowDataset):
+        return dataset
+    inner = getattr(dataset, "windows", None)
+    if isinstance(inner, ContextWindowDataset):
+        return inner
+    raise TypeError(f"{type(dataset).__name__} holds no context windows to alter")
+
+
+def shuffle_context(dataset: Any, *, seed: int = 0) -> None:
     """Shuffle the non-central positions of every window, in place.
 
-    A control, not an augmentation. If a temporal model scores as well with its
-    neighbours in a random order as with them in the right one, then whatever it
-    gained over a single-epoch model is not temporal structure -- it is the
-    extra parameters, or the fact that it saw eleven epochs' worth of signal at
-    all. The central position is left exactly where it is, so the model is still
-    being asked about the same epoch.
+    A control, not an augmentation. The central position is left exactly where
+    it is, so the model is still being asked about the same epoch, and presence
+    is shuffled with the signal, so the *amount* of real context is unchanged
+    and only its order is destroyed.
 
-    Presence is shuffled with the signal: a position that had no neighbour keeps
-    its absence, so the amount of real context is unchanged and only its order
-    is destroyed.
+    **What this control can and cannot show.** If a model scores as well with
+    its neighbours shuffled, it is not using their *order*. That is not the same
+    as not using them: a model that averaged its neighbours, or counted how many
+    of them looked like slow-wave sleep, would be entirely unaffected by
+    shuffling while still depending on context. Use :func:`mask_context` to ask
+    the other question.
     """
+    windows = _windows_of(dataset)
     rng = np.random.default_rng(seed)
-    centre = dataset.context // 2
-    others = np.array([i for i in range(dataset.context) if i != centre])
-    for rows, mask in zip(dataset.rows, dataset.masks, strict=True):
+    centre = windows.context // 2
+    others = np.array([i for i in range(windows.context) if i != centre])
+    for rows, mask in zip(windows.rows, windows.masks, strict=True):
         for window in range(rows.shape[0]):
             order = rng.permutation(others)
             rows[window, others] = rows[window, order]
             mask[window, others] = mask[window, order]
+
+
+def mask_context(dataset: Any) -> None:
+    """Mark every non-central position absent, in place.
+
+    The sharper of the two controls, and the one that answers the question
+    shuffling cannot: with all context removed, a temporal model is reduced to
+    its encoder on the central epoch. If the score does not move, the context
+    was contributing nothing at all -- not merely nothing that depended on order.
+
+    The absences are exactly the ones the model already knows how to handle: a
+    boundary window looks like this, so nothing about the input is out of
+    distribution.
+    """
+    windows = _windows_of(dataset)
+    centre = windows.context // 2
+    for mask in windows.masks:
+        keep = mask[:, centre].copy()
+        mask[:, :] = False
+        mask[:, centre] = keep
 
 
 IGNORE_LABEL = -100

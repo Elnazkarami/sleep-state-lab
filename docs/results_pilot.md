@@ -1,6 +1,6 @@
 # Pilot: six participants, real Sleep-EDF Cassette recordings
 
-Generated from `predictions_pilot.csv` (15414 saved prediction rows), split part `test`.
+Generated from `predictions_pilot.csv` (17983 saved prediction rows), split part `test`.
 
 Primary metric: **macro-F1 computed per participant, then averaged equally across people**. Pooled macro-F1 is over all epochs at once and is given beside it, never instead of it.
 
@@ -15,13 +15,14 @@ Absent-class rule: Within a participant, a stage with no true and no predicted e
 | D2 | 0.644 ± 0.000 | 0.644 | 0.718 | 0.679 | 0.807 | 2569 | 1 |
 | D2-shuffled-context | 0.644 ± 0.000 | 0.644 | 0.713 | 0.680 | 0.807 | 2569 | 1 |
 | logistic | 0.626 ± 0.000 | 0.626 | 0.644 | 0.689 | 0.815 | 2569 | 1 |
+| D2-context-masked | 0.552 ± 0.000 | 0.552 | 0.661 | 0.660 | 0.802 | 2569 | 1 |
 | class_prior | 0.150 ± 0.000 | 0.150 | 0.200 | 0.000 | 0.597 | 2569 | 1 |
 
 ## Per participant (primary metric)
 
-| participant | D1 | D2 | D2-shuffled-context | class_prior | logistic | random_forest |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SC404 | 0.702 | 0.644 | 0.644 | 0.150 | 0.626 | 0.717 |
+| participant | D1 | D2 | D2-context-masked | D2-shuffled-context | class_prior | logistic | random_forest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SC404 | 0.702 | 0.644 | 0.552 | 0.644 | 0.150 | 0.626 | 0.717 |
 
 ## random_forest
 
@@ -142,6 +143,30 @@ Run `pilot6-baselines`, split `4b13bdea21d4fdad`, seed 20260901. Quality-control
 | N2 | 3 | 188 | 423 | 3 | 3 |
 | N3 | 0 | 3 | 20 | 30 | 0 |
 | REM | 1 | 158 | 1 | 0 | 36 |
+
+## D2-context-masked
+
+Run `pilot6-d2`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.000 (0 flagged epochs of 2569).
+
+### Per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.957 | 0.979 | 0.968 | 0.968 | 1534 | 1 |
+| N1 | 0.000 | 0.000 | 0.000 | 0.000 | 166 | 1 |
+| N2 | 0.908 | 0.560 | 0.693 | 0.693 | 620 | 1 |
+| N3 | 0.490 | 0.943 | 0.645 | 0.645 | 53 | 1 |
+| REM | 0.313 | 0.821 | 0.453 | 0.453 | 196 | 1 |
+
+### Confusion matrix
+
+| true \ predicted | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wake | 1502 | 0 | 5 | 0 | 27 |
+| N1 | 49 | 0 | 7 | 1 | 109 |
+| N2 | 4 | 0 | 347 | 51 | 218 |
+| N3 | 0 | 0 | 3 | 50 | 0 |
+| REM | 15 | 0 | 20 | 0 | 161 |
 
 ## class_prior
 

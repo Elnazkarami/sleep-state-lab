@@ -21,7 +21,8 @@ anywhere else in this document.
 | classical baselines (class prior, logistic regression, random forest) | **implemented**, executed on synthetic and real data |
 | D1 — trainable epoch CNN | **implemented**, executed on synthetic and real data |
 | D2 — temporal transformer over 11 epochs | **implemented**, executed on synthetic and real data |
-| shuffled-neighbour control | **implemented**, executed on real data — **and it fired**: see Results |
+| shuffled-neighbour control | **implemented**, executed on real data |
+| context-masking control | **implemented**, executed on real data |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
 | D3 — D2 with a self-supervised pretrained encoder | **specified only** ([contract](docs/model_contracts.md)) — not implemented |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
@@ -35,11 +36,11 @@ person is one person's night. It shows the pipeline runs end to end on real
 recordings and produces coherent numbers. It is not a benchmark and no
 generalisation claim is made from it.
 
-**D1 and D2 have not been compared.** On the pilot D1 was given 20 passes over
-the training set and D2 six, because one D2 pass costs about eleven times one D1
-pass on a CPU. Their scores appear in the same table because they were produced
-from the same saved predictions; they are not compute-matched and the difference
-between them measures nothing.
+**D1 and D2 have been run at matched compute — on one held-out participant.**
+Sharing encodings between overlapping windows made a D2 pass cost the same as a
+D1 pass, so D2 has now been trained for the same twenty passes under the same
+settings. With one test participant the difference between any two models here
+is still not a measurement, and the README does not treat it as one.
 
 There are no pretrained checkpoints, no benchmark results, and no scientific
 conclusions in this repository.
@@ -327,6 +328,12 @@ Every one of those is a test in `tests/test_d2.py`, including the two that
 matter most: with all neighbours masked, changing them does not move the logits
 at all; with them present, it does.
 
+**Two controls, not one.** `predict --shuffle-context` permutes the neighbours,
+which asks whether their *order* is used. `predict --mask-context` marks them
+all absent, which asks whether they are used *at all*. They are different
+questions and the CLI refuses to run both at once, so a saved result always says
+which was asked.
+
 **Genuine-neighbour coverage** — the share of context positions that are real —
 is computed per dataset and reported with any D2 run. On the pilot it is 0.999,
 because these recordings have almost no excluded epochs; on a noisier cohort it
@@ -338,7 +345,10 @@ would make their difference mean something other than context.
 
 **Shared encodings.** Overlapping windows share ten of their eleven epochs, so
 training and inference encode a contiguous stretch of a recording once and gather
-the windows out of it — 32 centres cost 42 encodings rather than 352. It is the
+the windows out of it — 32 centres cost 42 encodings rather than 352. On the
+pilot that is 14,532 encodings per pass instead of 120,945, and **107 seconds per
+pass instead of 827** — the same cost as a D1 pass, which is what made the
+matched comparison affordable. It is the
 same model: one test asserts the two paths produce the same logits, another that
 they produce the same probabilities end to end, and `--no-segments` keeps the
 slow path available to check against. The cost is that a batch is several
@@ -404,11 +414,12 @@ is not a measure of anything.
 | D2 | 0.644 ± 0.000 | 0.644 | 0.718 | 0.679 | 0.807 | 2569 | 1 |
 | D2-shuffled-context | 0.644 ± 0.000 | 0.644 | 0.713 | 0.680 | 0.807 | 2569 | 1 |
 | logistic | 0.626 ± 0.000 | 0.626 | 0.644 | 0.689 | 0.815 | 2569 | 1 |
+| D2-context-masked | 0.552 ± 0.000 | 0.552 | 0.661 | 0.660 | 0.802 | 2569 | 1 |
 | class_prior | 0.150 ± 0.000 | 0.150 | 0.200 | 0.000 | 0.597 | 2569 | 1 |
 
-| participant | D1 | D2 | D2-shuffled-context | class_prior | logistic | random_forest |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SC404 | 0.702 | 0.644 | 0.644 | 0.150 | 0.626 | 0.717 |
+| participant | D1 | D2 | D2-context-masked | D2-shuffled-context | class_prior | logistic | random_forest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SC404 | 0.702 | 0.644 | 0.552 | 0.644 | 0.150 | 0.626 | 0.717 |
 
 The class-prior row is why accuracy is not reported alone: answering "wake"
 every time scores **59.7% accuracy** on these recordings, with κ exactly zero
@@ -420,47 +431,49 @@ participant, and is beaten by the random forest on macro-F1 (0.702 vs 0.717) and
 On one person, with three-quarters of the training signal being wake, **none of
 those differences should be read as a ranking.**
 
-#### The shuffled-neighbour control fired, and that is the pilot's real finding
+#### The context controls: what they say, and what they do not
 
-D2 and D2 with its neighbours randomly permuted score **the same to three
-decimal places** — 0.644 participant macro-F1, κ 0.679 against 0.680. Shuffling
-changes the predicted label for 104 of 2,569 epochs (4.0%), with a mean absolute
-change in probability of 0.013.
+Two controls, asking two different questions of the same trained model. Both are
+run from saved predictions like everything else.
 
-That is what the control is for. **This D2 is not using temporal structure.** Its
-score is what its encoder achieves on the central epoch, plus noise from a
-transformer that has learned to route around its own context. Whatever separates
-it from D1 here, it is not the thing D2 exists to add.
+**Shuffled neighbours** permutes the ten non-central positions of every window,
+keeping the centre and the amount of real context fixed. **Masked context**
+marks every non-central position absent, which reduces D2 to its encoder on the
+central epoch — an input the model already knows how to handle, because that is
+what a recording boundary looks like.
 
-Two ordinary explanations, neither of which this pilot can distinguish between:
-D2 was given six passes to D1's twenty, and 8,169 of 10,995 training centres are
-wake epochs inside long stretches of wake, where a neighbour tells you nothing
-you did not already know. **D1 and D2 are therefore not compared here**, and
-their rows sit in one table only because they came from one prediction file.
+| | 6 passes | 20 passes (matched to D1) |
+| --- | ---: | ---: |
+| D2 | 0.644 | 0.576 |
+| D2, neighbours shuffled | 0.644 | 0.571 |
+| D2, context masked | 0.552 | 0.481 |
 
-The result does say something useful about the code: the control is wired
-correctly and would have caught a context story that was not there. That is the
-whole reason it was implemented before the benchmark rather than after.
+Participant macro-F1 on the held-out participant. The two D2 runs are separate
+prediction files: [docs/results_pilot.md](docs/results_pilot.md) and
+[docs/results_d2_controls.md](docs/results_d2_controls.md).
 
-#### D1, per stage
+**The context is being used.** Removing it costs about 0.09 macro-F1 in both
+runs. **Its order is not.** Shuffling costs 0.000 and 0.005.
 
-| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wake | 0.989 | 0.962 | 0.975 | 0.975 | 1534 | 1 |
-| N1 | 0.335 | 0.524 | 0.408 | 0.408 | 166 | 1 |
-| N2 | 0.980 | 0.698 | 0.815 | 0.815 | 620 | 1 |
-| N3 | 0.708 | 0.868 | 0.780 | 0.780 | 53 | 1 |
-| REM | 0.434 | 0.689 | 0.533 | 0.533 | 196 | 1 |
+So D2 reads its neighbourhood as an unordered summary — how much of the
+surrounding five minutes looks like slow-wave sleep, say — rather than as a
+sequence. That is a real use of context and a weaker one than the architecture
+allows; a transformer with learned positional embeddings is free to use order
+and, here, does not.
 
-#### D1, confusion matrix
+Two things follow that matter more than the numbers. First, **the shuffled
+control alone cannot support the claim that context is unused** — a model that
+averages its neighbours is invariant to shuffling while depending on them
+completely. That is why the masking control exists, and it is why the earlier
+reading of the six-pass run was wrong. Second, **"D2 was undertrained" is no
+longer the explanation**: at compute matched to D1 the pattern is the same, and
+if anything stronger.
 
-| true \ predicted | Wake | N1 | N2 | N3 | REM |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Wake | 1475 | 50 | 0 | 1 | 8 |
-| N1 | 16 | 87 | 2 | 1 | 60 |
-| N2 | 0 | 62 | 433 | 17 | 108 |
-| N3 | 0 | 0 | 7 | 46 | 0 |
-| REM | 0 | 61 | 0 | 0 | 135 |
+What this does not establish: that order is unusable on this task. Four training
+participants, one validation participant deciding which checkpoint is kept, and
+one test participant is not a setting in which an absence of evidence means very
+much. The validation score swung between 0.33 and 0.80 across passes, so
+checkpoint selection here is substantially noise.
 
 #### D2, per stage
 

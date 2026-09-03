@@ -8,7 +8,7 @@
 | D2 — temporal transformer over 11 epochs | **implemented and trained** (synthetic and the same pilot) |
 | D3 — D2 with a self-supervised pretrained encoder | **specified below; not implemented** |
 | the label-budget benchmark | **not run** |
-| the required controls | **one of six implemented** (shuffled neighbours); the rest are listed below and not run |
+| the required controls | **two of six implemented** (shuffled neighbours, masked context); the rest are listed below and not run |
 
 No checkpoint, score, or conclusion for D3 exists, and the D1-versus-D2 pilot
 numbers are not a comparison — the two were not given matched compute, which the
@@ -161,10 +161,15 @@ Each of these exists to close a specific alternative explanation.
 
 0. **Shuffled neighbours** — *implemented*: `sleepstatelab predict
    --shuffle-context` permutes the non-central positions of every window,
-   keeping the centre and the amount of real context fixed, and writes its
-   predictions under a separate model name. If a temporal model scores as well
-   with its neighbours in a random order, whatever it gained was not temporal
-   structure.
+   keeping the centre and the amount of real context fixed. It asks whether the
+   **order** of the context is used. It cannot answer whether the context is
+   used at all: a model that averaged its neighbours would be invariant to
+   shuffling while depending on them completely, which is close to what the
+   pilot actually found.
+0b. **Masked context** — *implemented*: `sleepstatelab predict --mask-context`
+   marks every non-central position absent, reducing a temporal model to its
+   encoder on the central epoch. This is the control that answers whether the
+   context contributes anything, and the two must be read together.
 1. **Pretrained epoch CNN without temporal context** — is the gain from the
    representation, or only from having a transformer?
 2. **Frozen random versus frozen pretrained encoder, same probe** — does the

@@ -208,6 +208,110 @@
     }
   },
   {
+    "model": "D2-context-masked",
+    "run_id": "pilot6-d2",
+    "split_id": "4b13bdea21d4fdad",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 2569,
+    "n_participants": 1,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.5516885657892294,
+    "participant_macro_f1_sd": 0.0,
+    "participant_macro_f1": {
+      "SC404": 0.5516885657892294
+    },
+    "pooled_macro_f1": 0.5516885657892294,
+    "pooled_accuracy": 0.8018684312962242,
+    "balanced_accuracy": 0.6607283443523475,
+    "cohens_kappa": 0.6601988724583863,
+    "per_stage_precision": {
+      "Wake": 0.956687898089172,
+      "N1": 0.0,
+      "N2": 0.9083769633507853,
+      "N3": 0.49019607843137253,
+      "REM": 0.312621359223301
+    },
+    "per_stage_recall": {
+      "Wake": 0.9791395045632334,
+      "N1": 0.0,
+      "N2": 0.5596774193548387,
+      "N3": 0.9433962264150944,
+      "REM": 0.8214285714285714
+    },
+    "per_stage_f1": {
+      "Wake": 0.9677835051546392,
+      "N1": 0.0,
+      "N2": 0.6926147704590818,
+      "N3": 0.6451612903225806,
+      "REM": 0.45288326300984527
+    },
+    "per_stage_support": {
+      "Wake": 1534,
+      "N1": 166,
+      "N2": 620,
+      "N3": 53,
+      "REM": 196
+    },
+    "per_stage_participants": {
+      "Wake": 1,
+      "N1": 1,
+      "N2": 1,
+      "N3": 1,
+      "REM": 1
+    },
+    "confusion": [
+      [
+        1502,
+        0,
+        5,
+        0,
+        27
+      ],
+      [
+        49,
+        0,
+        7,
+        1,
+        109
+      ],
+      [
+        4,
+        0,
+        347,
+        51,
+        218
+      ],
+      [
+        0,
+        0,
+        3,
+        50,
+        0
+      ],
+      [
+        15,
+        0,
+        20,
+        0,
+        161
+      ]
+    ],
+    "qc_flagged_epochs": 0,
+    "qc_coverage": 1.0,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  },
+  {
     "model": "D2-shuffled-context",
     "run_id": "pilot6-d2",
     "split_id": "4b13bdea21d4fdad",

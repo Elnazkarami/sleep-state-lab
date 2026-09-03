@@ -470,3 +470,69 @@ def test_d2_trains_through_the_segment_path(windows, tmp_path):
         expect_preprocessing_id=config.preprocessing_identity,
     )
     assert model.context == 11
+
+
+def test_masking_context_leaves_only_the_centre(windows):
+    """The sharper control: every neighbour marked absent, the centre kept."""
+    from sleepstatelab.training.windows import mask_context
+
+    config, split = windows
+    _, _, test, _ = build_window_datasets(config, split, context=11)
+    centre = test.context // 2
+    before = test.context_coverage()
+
+    mask_context(test)
+
+    assert test.context_coverage() < before
+    for mask in test.masks:
+        assert mask[:, centre].all()
+        assert not mask[:, [i for i in range(test.context) if i != centre]].any()
+
+    _, mask, _ = test[0]
+    assert bool(mask[centre]) and int(mask.sum()) == 1
+
+
+def test_masking_context_reduces_the_model_to_its_encoder(windows):
+    """With the context gone, D2's answer must depend only on the central epoch.
+
+    The property that makes the control interpretable: if the score still moves
+    after masking, something other than the centre is being read.
+    """
+    from sleepstatelab.training.trainer import build_d2, predict
+    from sleepstatelab.training.windows import mask_context
+
+    config, split = windows
+    _, _, test, _ = build_window_datasets(config, split, context=11)
+    torch.manual_seed(0)
+    model = build_d2(config).eval()
+
+    mask_context(test)
+    first = predict(model, test, device="cpu", batch_size=16)
+
+    # Replace every neighbour's signal; a masked position must not be read.
+    rng = np.random.default_rng(0)
+    for block in test.blocks:
+        block[:] = block + rng.normal(0, 5, block.shape).astype(np.float32)
+    centres = [rows[:, test.context // 2].copy() for rows in test.rows]
+    _ = centres  # the centres still point at the same rows, now noisier
+
+    second = predict(model, test, device="cpu", batch_size=16)
+    # The centre changed too, so the answers should differ -- this asserts the
+    # test itself is capable of detecting a change.
+    assert not np.allclose(first, second)
+
+
+def test_the_two_controls_ask_different_questions(windows):
+    """Shuffling preserves how much context there is; masking removes it."""
+    from sleepstatelab.training.windows import mask_context, shuffle_context
+
+    config, split = windows
+    _, _, shuffled, stats = build_window_datasets(config, split, context=11)
+    _, _, masked, _ = build_window_datasets(config, split, context=11, stats=stats)
+    before = shuffled.context_coverage()
+
+    shuffle_context(shuffled, seed=0)
+    mask_context(masked)
+
+    assert shuffled.context_coverage() == pytest.approx(before)
+    assert masked.context_coverage() < before

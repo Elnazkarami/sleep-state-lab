@@ -478,16 +478,31 @@ def cmd_predict(args: argparse.Namespace) -> int:
     else:
         train, val, test, _ = build_datasets(config, split, stats=stats)
     dataset = {"train": train, "val": val, "test": test}[args.part]
+    if (args.shuffle_context or args.mask_context) and not checkpoint.temporal_kwargs:
+        raise SystemExit("the context controls only mean something for a temporal model")
+    if args.shuffle_context and args.mask_context:
+        raise SystemExit(
+            "--shuffle-context and --mask-context are different questions; run them "
+            "separately so each result says which was asked"
+        )
     if args.shuffle_context:
-        if not checkpoint.temporal_kwargs:
-            raise SystemExit("--shuffle-context only means something for a temporal model")
         from sleepstatelab.training.windows import shuffle_context
 
         shuffle_context(dataset, seed=args.shuffle_seed)
         print(
             f"CONTROL RUN: the non-central positions of every window have been "
             f"shuffled with seed {args.shuffle_seed}. If the score holds up, the "
-            "model is not using temporal structure."
+            "model is not using the ORDER of its context -- which is not the same "
+            "as not using the context."
+        )
+    if args.mask_context:
+        from sleepstatelab.training.windows import mask_context
+
+        mask_context(dataset)
+        print(
+            "CONTROL RUN: every non-central position has been marked absent, so "
+            "the model is reduced to its encoder on the central epoch. If the "
+            "score holds up, the context was contributing nothing at all."
         )
     probabilities = predict(model, dataset, device=device)
     with PredictionWriter(args.output, overwrite=not args.append) as writer:
@@ -651,6 +666,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="control: shuffle the non-central context positions before predicting",
     )
     predict_cmd.add_argument("--shuffle-seed", type=int, default=0)
+    predict_cmd.add_argument(
+        "--mask-context",
+        action="store_true",
+        help=(
+            "control: mark every non-central position absent, reducing a "
+            "temporal model to its encoder on the central epoch"
+        ),
+    )
     predict_cmd.set_defaults(func=cmd_predict)
 
     report = subparsers.add_parser("report", help="build tables from saved predictions")

@@ -1,0 +1,314 @@
+[
+  {
+    "model": "D2",
+    "run_id": "pilot6-d2-matched",
+    "split_id": "4b13bdea21d4fdad",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 2569,
+    "n_participants": 1,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.5760154759288989,
+    "participant_macro_f1_sd": 0.0,
+    "participant_macro_f1": {
+      "SC404": 0.5760154759288989
+    },
+    "pooled_macro_f1": 0.5760154759288989,
+    "pooled_accuracy": 0.7668353444920203,
+    "balanced_accuracy": 0.6305595666842014,
+    "cohens_kappa": 0.6142512104542135,
+    "per_stage_precision": {
+      "Wake": 0.9799196787148594,
+      "N1": 0.25,
+      "N2": 0.9438596491228071,
+      "N3": 0.6333333333333333,
+      "REM": 0.27796610169491526
+    },
+    "per_stage_recall": {
+      "Wake": 0.954367666232073,
+      "N1": 0.21084337349397592,
+      "N2": 0.4338709677419355,
+      "N3": 0.7169811320754716,
+      "REM": 0.8367346938775511
+    },
+    "per_stage_f1": {
+      "Wake": 0.9669749009247027,
+      "N1": 0.22875816993464054,
+      "N2": 0.5944751381215471,
+      "N3": 0.672566371681416,
+      "REM": 0.41730279898218825
+    },
+    "per_stage_support": {
+      "Wake": 1534,
+      "N1": 166,
+      "N2": 620,
+      "N3": 53,
+      "REM": 196
+    },
+    "per_stage_participants": {
+      "Wake": 1,
+      "N1": 1,
+      "N2": 1,
+      "N3": 1,
+      "REM": 1
+    },
+    "confusion": [
+      [
+        1464,
+        32,
+        1,
+        0,
+        37
+      ],
+      [
+        29,
+        35,
+        2,
+        0,
+        100
+      ],
+      [
+        0,
+        42,
+        269,
+        22,
+        287
+      ],
+      [
+        0,
+        0,
+        13,
+        38,
+        2
+      ],
+      [
+        1,
+        31,
+        0,
+        0,
+        164
+      ]
+    ],
+    "qc_flagged_epochs": 0,
+    "qc_coverage": 1.0,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  },
+  {
+    "model": "D2-context-masked",
+    "run_id": "pilot6-d2-matched",
+    "split_id": "4b13bdea21d4fdad",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 2569,
+    "n_participants": 1,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.48134571851647384,
+    "participant_macro_f1_sd": 0.0,
+    "participant_macro_f1": {
+      "SC404": 0.48134571851647384
+    },
+    "pooled_macro_f1": 0.48134571851647384,
+    "pooled_accuracy": 0.7598287271311794,
+    "balanced_accuracy": 0.621991884256212,
+    "cohens_kappa": 0.5944804292732246,
+    "per_stage_precision": {
+      "Wake": 0.9526854219948849,
+      "N1": 0.0,
+      "N2": 0.9130434782608695,
+      "N3": 0.3096774193548387,
+      "REM": 0.28222996515679444
+    },
+    "per_stage_recall": {
+      "Wake": 0.9713168187744459,
+      "N1": 0.0,
+      "N2": 0.4064516129032258,
+      "N3": 0.9056603773584906,
+      "REM": 0.826530612244898
+    },
+    "per_stage_f1": {
+      "Wake": 0.9619109102646869,
+      "N1": 0.0,
+      "N2": 0.5625,
+      "N3": 0.4615384615384615,
+      "REM": 0.4207792207792208
+    },
+    "per_stage_support": {
+      "Wake": 1534,
+      "N1": 166,
+      "N2": 620,
+      "N3": 53,
+      "REM": 196
+    },
+    "per_stage_participants": {
+      "Wake": 1,
+      "N1": 1,
+      "N2": 1,
+      "N3": 1,
+      "REM": 1
+    },
+    "confusion": [
+      [
+        1490,
+        0,
+        5,
+        0,
+        39
+      ],
+      [
+        44,
+        0,
+        7,
+        1,
+        114
+      ],
+      [
+        5,
+        0,
+        252,
+        106,
+        257
+      ],
+      [
+        0,
+        0,
+        3,
+        48,
+        2
+      ],
+      [
+        25,
+        0,
+        9,
+        0,
+        162
+      ]
+    ],
+    "qc_flagged_epochs": 0,
+    "qc_coverage": 1.0,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  },
+  {
+    "model": "D2-shuffled-context",
+    "run_id": "pilot6-d2-matched",
+    "split_id": "4b13bdea21d4fdad",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 2569,
+    "n_participants": 1,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.5710126923171271,
+    "participant_macro_f1_sd": 0.0,
+    "participant_macro_f1": {
+      "SC404": 0.5710126923171271
+    },
+    "pooled_macro_f1": 0.5710126923171271,
+    "pooled_accuracy": 0.7652783184118334,
+    "balanced_accuracy": 0.6246147873555306,
+    "cohens_kappa": 0.611781723625222,
+    "per_stage_precision": {
+      "Wake": 0.9799062290689886,
+      "N1": 0.23972602739726026,
+      "N2": 0.9405594405594405,
+      "N3": 0.6166666666666667,
+      "REM": 0.2773972602739726
+    },
+    "per_stage_recall": {
+      "Wake": 0.953715775749674,
+      "N1": 0.21084337349397592,
+      "N2": 0.4338709677419355,
+      "N3": 0.6981132075471698,
+      "REM": 0.826530612244898
+    },
+    "per_stage_f1": {
+      "Wake": 0.9666336306574166,
+      "N1": 0.22435897435897437,
+      "N2": 0.5938189845474614,
+      "N3": 0.6548672566371682,
+      "REM": 0.4153846153846154
+    },
+    "per_stage_support": {
+      "Wake": 1534,
+      "N1": 166,
+      "N2": 620,
+      "N3": 53,
+      "REM": 196
+    },
+    "per_stage_participants": {
+      "Wake": 1,
+      "N1": 1,
+      "N2": 1,
+      "N3": 1,
+      "REM": 1
+    },
+    "confusion": [
+      [
+        1463,
+        33,
+        1,
+        0,
+        37
+      ],
+      [
+        29,
+        35,
+        2,
+        0,
+        100
+      ],
+      [
+        0,
+        45,
+        269,
+        23,
+        283
+      ],
+      [
+        0,
+        0,
+        14,
+        37,
+        2
+      ],
+      [
+        1,
+        33,
+        0,
+        0,
+        162
+      ]
+    ],
+    "qc_flagged_epochs": 0,
+    "qc_coverage": 1.0,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  }
+]
