@@ -170,3 +170,131 @@ def load_checkpoint(
         notes=payload.get("notes", {}),
     )
     return model, checkpoint
+
+
+ENCODER_FORMAT = "sleepstatelab-encoder-1.0"
+"""A pretrained backbone on its own, with no head and no classes.
+
+Kept as its own format rather than as a classifier with a random head, because
+what the file contains is exactly what D3 inherits and nothing else. A file that
+claimed to be a classifier would invite someone to evaluate it as one.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class EncoderCheckpoint:
+    """A self-supervised encoder and the record of what produced it."""
+
+    format: str
+    state_dict: dict[str, Any]
+    encoder_kwargs: dict[str, Any]
+    channels: tuple[str, ...]
+    preprocessing_id: str
+    normalization: dict[str, Any]
+    split_id: str
+    split_name: str
+    pretrain_participants: tuple[str, ...]
+    """Exactly whose data the encoder saw. The whole limited-label claim rests on
+    this list excluding the validation and test participants, so it is recorded
+    rather than assumed, and the loader checks it against the split."""
+
+    seed: int
+    code_revision: str
+    config_id: str
+    config: dict[str, Any]
+    objective: str
+    epoch_selected: int
+    metric_name: str
+    metric_value: float
+    history: list[dict[str, float]] = field(default_factory=list)
+    notes: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def save_encoder_checkpoint(path: Path | str, checkpoint: EncoderCheckpoint) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint.to_payload(), target)
+    return target
+
+
+def load_encoder_checkpoint(
+    path: Path | str,
+    *,
+    expect_channels: tuple[str, ...] | None = None,
+    expect_preprocessing_id: str | None = None,
+    forbid_participants: tuple[str, ...] = (),
+) -> tuple[EpochEncoder, EncoderCheckpoint]:
+    """Rebuild a pretrained encoder, refusing one that saw the wrong people.
+
+    ``forbid_participants`` is the caller's validation and test set. A pretrained
+    encoder that has seen them is not a limited-label result, and the failure is
+    silent in every other respect -- the run trains, the numbers look good, and
+    the claim is void. So it raises here.
+    """
+    payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+    if payload.get("format") != ENCODER_FORMAT:
+        raise ValueError(
+            f"{path} is format {payload.get('format')!r}, not an encoder checkpoint "
+            f"({ENCODER_FORMAT!r})"
+        )
+    if expect_channels is not None and tuple(payload["channels"]) != tuple(expect_channels):
+        raise ValueError(
+            f"{path} was pretrained on channels {tuple(payload['channels'])}, "
+            f"but {tuple(expect_channels)} were asked for"
+        )
+    if (
+        expect_preprocessing_id is not None
+        and payload["preprocessing_id"] != expect_preprocessing_id
+    ):
+        raise ValueError(
+            f"{path} was pretrained under preprocessing {payload['preprocessing_id']}, "
+            f"but {expect_preprocessing_id} is configured"
+        )
+    seen = set(payload["pretrain_participants"])
+    leaked = sorted(seen & set(forbid_participants))
+    if leaked:
+        raise ValueError(
+            f"{path} was pretrained on {leaked}, which this run holds out. "
+            "A pretrained encoder that has seen the held-out participants makes "
+            "the limited-label comparison meaningless."
+        )
+
+    encoder = EpochEncoder(**payload["encoder_kwargs"])
+    encoder.load_state_dict(payload["state_dict"])
+    encoder.eval()
+    checkpoint = EncoderCheckpoint(
+        format=payload["format"],
+        state_dict=payload["state_dict"],
+        encoder_kwargs=payload["encoder_kwargs"],
+        channels=tuple(payload["channels"]),
+        preprocessing_id=payload["preprocessing_id"],
+        normalization=payload["normalization"],
+        split_id=payload["split_id"],
+        split_name=payload["split_name"],
+        pretrain_participants=tuple(payload["pretrain_participants"]),
+        seed=payload["seed"],
+        code_revision=payload["code_revision"],
+        config_id=payload["config_id"],
+        config=payload["config"],
+        objective=payload["objective"],
+        epoch_selected=payload["epoch_selected"],
+        metric_name=payload["metric_name"],
+        metric_value=payload["metric_value"],
+        history=payload.get("history", []),
+        notes=payload.get("notes", {}),
+    )
+    return encoder, checkpoint
+
+
+def is_encoder_checkpoint(path: Path | str) -> bool:
+    """Whether a file is a bare pretrained encoder rather than a whole model."""
+    try:
+        payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+    except Exception:
+        # An unreadable file is simply not one of ours; the caller falls back to
+        # treating it as a model checkpoint, which will raise with a better message.
+        return False
+    return isinstance(payload, dict) and payload.get("format") == ENCODER_FORMAT

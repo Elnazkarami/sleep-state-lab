@@ -28,6 +28,7 @@ EXPECTED = {
     "baselines",
     "train-d1",
     "train-d2",
+    "pretrain",
     "predict",
     "report",
     "smoke",

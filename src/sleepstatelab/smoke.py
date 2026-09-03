@@ -78,6 +78,46 @@ def overfit_check(
     return {"initial_loss": first, "final_loss": last, "train_accuracy": accuracy}
 
 
+def _pretrain_stage(config, split, train, val, device, target):
+    """Self-supervised pretraining inside the smoke run, and its own checks.
+
+    Two properties are asserted here rather than only in the unit tests, because
+    they are the ones whose failure would be invisible: the encoder saw only
+    training participants, and the file it produced round-trips into a usable
+    backbone with the held-out participants refused.
+    """
+    from sleepstatelab.training.checkpoint import load_encoder_checkpoint
+    from sleepstatelab.training.pretrain import pretrain_encoder
+
+    _, checkpoint, _ = pretrain_encoder(
+        config,
+        split,
+        train,
+        val,
+        device=device,
+        checkpoint_path=target / "encoder_synthetic.pt",
+        run_id="synthetic-smoke-pretrain",
+        progress=True,
+    )
+    print(
+        f"6e. pretrained by {checkpoint.objective} on "
+        f"{', '.join(checkpoint.pretrain_participants)}; validation "
+        f"reconstruction {checkpoint.metric_value:.4f}"
+    )
+    seen = set(checkpoint.pretrain_participants)
+    leaked = seen & (set(split.val) | set(split.test))
+    if leaked:
+        raise AssertionError(f"pretraining saw held-out participants {sorted(leaked)}")
+
+    encoder, _ = load_encoder_checkpoint(
+        target / "encoder_synthetic.pt",
+        expect_channels=tuple(config.data.channels),
+        expect_preprocessing_id=config.preprocessing_identity,
+        forbid_participants=tuple(split.val) + tuple(split.test),
+    )
+    return encoder
+
+
 def run_smoke(*, out_dir: str | Path = "outputs/smoke", device: str = "cpu", quick: bool = True) -> int:
     """Generate a cohort, run the whole pipeline over it, and report."""
     from sleepstatelab.baselines.classical import run_baselines
@@ -200,6 +240,39 @@ def run_smoke(*, out_dir: str | Path = "outputs/smoke", device: str = "cpu", qui
             f"{moved:.4f}"
         )
 
+        # D3's first stage: self-supervised masked reconstruction on the
+        # training participants, then the same D2 architecture initialised from
+        # it. Two passes over generated signals is not an experiment; it is a
+        # check that the path runs and that the encoder actually transfers.
+        pretrain_encoder = _pretrain_stage(config, split, train, val, resolved, target)
+        d3_train, d3_val, d3_test, _ = build_window_datasets(
+            config, split, context=config.model.context_epochs
+        )
+        _, d3_checkpoint, _ = train_d2(
+            config,
+            split,
+            d3_train,
+            d3_val,
+            encoder=pretrain_encoder,
+            device=resolved,
+            checkpoint_path=target / "d3_synthetic.pt",
+            run_id="synthetic-smoke-d3",
+            progress=False,
+        )
+        d3_probabilities = predict(
+            load_checkpoint(
+                target / "d3_synthetic.pt",
+                expect_channels=tuple(config.data.channels),
+                expect_preprocessing_id=config.preprocessing_identity,
+            )[0].to(resolved),
+            d3_test,
+            device=resolved,
+        )
+        print(
+            f"6f. D3 trained from the pretrained encoder: "
+            f"{d3_checkpoint.notes['n_parameters']}"
+        )
+
         reject = reject_mask_flags(tuple(config.preprocess.qc_reject))
 
         def features_for(participants: set[str]) -> np.ndarray:
@@ -247,6 +320,19 @@ def run_smoke(*, out_dir: str | Path = "outputs/smoke", device: str = "cpu", qui
                 true_labels=window_test.y,
                 probabilities=d2_probabilities,
                 qc_flags=np.array([e.qc_flags for e in window_test.entries]),
+            )
+            writer.write(
+                run_id="synthetic-smoke",
+                model="D3",
+                split_id=split.identity,
+                split_part="test",
+                seed=config.train.seed,
+                participant_ids=[e.participant_id for e in d3_test.entries],
+                recording_ids=[e.recording_id for e in d3_test.entries],
+                epoch_indices=np.array([e.epoch_index for e in d3_test.entries]),
+                true_labels=d3_test.y,
+                probabilities=d3_probabilities,
+                qc_flags=np.array([e.qc_flags for e in d3_test.entries]),
             )
             for name, block in baselines.items():
                 writer.write(

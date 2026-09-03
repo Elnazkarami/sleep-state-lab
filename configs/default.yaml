@@ -62,3 +62,14 @@ train:
   grad_clip: 5.0
   num_workers: 0
   max_train_batches: 0            # 0 means the whole training set
+
+pretrain:
+  patch_samples: 0              # 0 = derive from the encoder (96 samples)
+  mask_ratio: 0.5
+  decoder_width: 64             # small on purpose: the encoder is what is kept
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  early_stopping_patience: 6
+  max_batches: 0                # 0 means the whole training set

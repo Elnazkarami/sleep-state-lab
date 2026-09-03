@@ -112,6 +112,32 @@ would need recordings can never be confused:
 | D2 trains through the segment path and reloads | `test_d2.py::test_d2_trains_through_the_segment_path` |
 | **D2 overfits a tiny batch**: accuracy 1.000, loss < 0.05 | `test_d2.py::test_d2_can_overfit_a_tiny_batch` |
 
+## Self-supervised pretraining, and the leak it must not have
+
+| what is asserted | test |
+| --- | --- |
+| the mask hides whole patches, and the right number of them | `test_pretrain.py::test_the_mask_hides_whole_patches_and_the_right_number_of_them` |
+| the mask differs between epochs in a batch | `test_pretrain.py::test_the_mask_differs_between_epochs_in_a_batch` |
+| an impossible mask is refused | `test_pretrain.py::test_an_impossible_mask_is_refused` |
+| **changing hidden values leaves the encoder's input identical** | `test_pretrain.py::test_hidden_values_never_reach_the_encoder` |
+| **and leaves its embedding unchanged** | `test_pretrain.py::test_hidden_values_do_not_move_the_embedding` |
+| hidden samples are replaced by the mask value, not attenuated | `test_pretrain.py::test_hidden_samples_are_replaced_not_attenuated` |
+| visible samples are untouched | `test_pretrain.py::test_visible_samples_are_untouched` |
+| the loss ignores visible samples entirely | `test_pretrain.py::test_the_loss_ignores_visible_samples` |
+| the loss is exactly the mean squared error over hidden samples | `test_pretrain.py::test_the_loss_counts_masked_samples` |
+| the loss can exclude samples marked invalid | `test_pretrain.py::test_the_loss_can_exclude_invalid_samples` |
+| the patch is aligned to the encoder's tokens | `test_pretrain.py::test_the_patch_is_aligned_to_the_encoders_tokens` |
+| the uncovered tail is never masked and never scored | `test_pretrain.py::test_the_uncovered_tail_is_never_masked_and_never_scored` |
+| **the decoder can represent a 13 Hz rhythm** (spindles are 12–16 Hz) | `test_pretrain.py::test_the_reconstruction_can_represent_a_fast_rhythm` |
+| pretraining does not change the encoder's architecture | `test_pretrain.py::test_pretraining_does_not_change_the_encoder_architecture` |
+| the decoder is under a tenth of the encoder | `test_pretrain.py::test_the_decoder_is_small_relative_to_the_encoder` |
+| reconstruction loss at least halves on a structured signal | `test_pretrain.py::test_reconstruction_learns_something_on_a_structured_signal` |
+| pretraining settings do not change the epoch cache's identity | `test_pretrain.py::test_config_carries_the_pretraining_settings` |
+
+The smoke run additionally asserts, on generated recordings, that the encoder saw
+only training participants and that its checkpoint round-trips into a usable
+backbone with the held-out participants refused.
+
 ## The command line exists and dispatches
 
 | what is asserted | test |

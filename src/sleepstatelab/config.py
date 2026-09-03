@@ -185,6 +185,33 @@ class TrainConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PretrainConfig:
+    """Masked reconstruction, the self-supervised stage D3's encoder starts from."""
+
+    patch_samples: int = 0
+    """0 derives the patch from the encoder: one token per patch, 96 samples at
+    this package's defaults, which is 0.96 s. Long enough that filling a hidden
+    patch back in requires knowing what EEG does rather than interpolating
+    between the samples either side of it, and aligned so the decoder can draw
+    the patch its token covers at full sample resolution. Set it by hand only
+    with a reason: a patch that straddles tokens asks an output block to answer
+    for input it never saw."""
+
+    mask_ratio: float = 0.5
+    decoder_width: int = 64
+    """Deliberately small. A strong decoder can reconstruct from a weak
+    representation, which moves the work out of the encoder -- and the encoder is
+    the only part that is kept."""
+
+    epochs: int = 30
+    batch_size: int = 64
+    learning_rate: float = 1e-3
+    weight_decay: float = 1e-4
+    early_stopping_patience: int = 6
+    max_batches: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     """The whole resolved configuration for one experiment."""
 
@@ -194,6 +221,7 @@ class Config:
     split: SplitConfig = field(default_factory=SplitConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
+    pretrain: PretrainConfig = field(default_factory=PretrainConfig)
 
     @property
     def samples_per_epoch(self) -> int:
@@ -252,6 +280,7 @@ def from_dict(payload: dict[str, Any]) -> Config:
         "split": SplitConfig,
         "model": ModelConfig,
         "train": TrainConfig,
+        "pretrain": PretrainConfig,
     }
     known = {f.name for f in fields(Config)}
     unknown = sorted(set(payload) - known)

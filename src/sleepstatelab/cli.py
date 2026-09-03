@@ -322,21 +322,52 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
         )
 
     encoder = None
+    initialised_from = None
     if args.init_encoder:
-        # The route a pretrained backbone takes into D2, and the one D3 will
-        # use. It is named in the checkpoint so a run started from a pretrained
+        # The route a pretrained backbone takes into D2 -- this is D3. What is
+        # loaded is named in the checkpoint, so a run started from a pretrained
         # encoder can never be mistaken for one started from random weights.
-        source, source_checkpoint = load_checkpoint(
-            args.init_encoder,
-            expect_channels=tuple(config.data.channels),
-            expect_preprocessing_id=config.preprocessing_identity,
+        from sleepstatelab.training.checkpoint import (
+            is_encoder_checkpoint,
+            load_encoder_checkpoint,
         )
-        encoder = source.encoder
-        print(
-            f"encoder initialised from {args.init_encoder} "
-            f"({source_checkpoint.model_name}, run "
-            f"{source_checkpoint.notes.get('run_id', 'unknown')})"
-        )
+
+        if is_encoder_checkpoint(args.init_encoder):
+            encoder, source_encoder = load_encoder_checkpoint(
+                args.init_encoder,
+                expect_channels=tuple(config.data.channels),
+                expect_preprocessing_id=config.preprocessing_identity,
+                forbid_participants=tuple(split.val) + tuple(split.test),
+            )
+            initialised_from = {
+                "path": str(args.init_encoder),
+                "kind": "self-supervised encoder",
+                "objective": source_encoder.objective,
+                "pretrain_participants": list(source_encoder.pretrain_participants),
+                "run_id": source_encoder.notes.get("run_id", "unknown"),
+            }
+            print(
+                f"encoder initialised from {args.init_encoder}: "
+                f"{source_encoder.objective}, pretrained on "
+                f"{', '.join(source_encoder.pretrain_participants)}"
+            )
+        else:
+            source, source_checkpoint = load_checkpoint(
+                args.init_encoder,
+                expect_channels=tuple(config.data.channels),
+                expect_preprocessing_id=config.preprocessing_identity,
+            )
+            encoder = source.encoder
+            initialised_from = {
+                "path": str(args.init_encoder),
+                "kind": f"supervised {source_checkpoint.model_name}",
+                "run_id": source_checkpoint.notes.get("run_id", "unknown"),
+            }
+            print(
+                f"encoder initialised from {args.init_encoder} "
+                f"({source_checkpoint.model_name}, run "
+                f"{source_checkpoint.notes.get('run_id', 'unknown')})"
+            )
 
     segments = not args.no_segments
     centres = config.model.centres_per_segment
@@ -414,11 +445,80 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
         extra={
             "label_budget": args.label_budget,
             "checkpoint": str(args.checkpoint),
-            "init_encoder": args.init_encoder,
+            "init_encoder": initialised_from,
             "context_epochs": config.model.context_epochs,
             "context_coverage_train": train.context_coverage(),
             "shared_encodings": segments,
             "centres_per_segment": centres if segments else None,
+        },
+    ).write(Path(args.checkpoint).with_suffix(".provenance.json"))
+    return 0
+
+
+def cmd_pretrain(args: argparse.Namespace) -> int:
+    """Self-supervised masked reconstruction on training participants only."""
+    from sleepstatelab.data.splits import Split
+    from sleepstatelab.provenance import make_run_provenance
+    from sleepstatelab.training.dataset import build_datasets
+    from sleepstatelab.training.pretrain import pretrain_encoder
+
+    config = _with_overrides(load(args.config), args)
+    device = resolve(config.train.device)
+    split = Split.read(args.split)
+
+    train, val, _, stats = build_datasets(config, split)
+    print(
+        f"pretraining on {len(train)} epochs from {len(train.participants)} "
+        f"training participant(s): {', '.join(train.participants)}"
+    )
+    print(
+        f"held out of pretraining: val {', '.join(split.val)}; "
+        f"test {', '.join(split.test)}"
+    )
+    # The patch is derived from the encoder unless it was set by hand, so the
+    # model is the authority on what is about to happen -- not the config file.
+    from sleepstatelab.training.pretrain import build_pretrainer
+
+    shape = build_pretrainer(config)
+    print(
+        f"masking {shape.n_patches_masked} of {shape.n_patches} patches of "
+        f"{shape.patch_samples} samples ({shape.mask_ratio:.0%}); "
+        f"tokens cover {shape.covered_samples} of {config.samples_per_epoch} "
+        "samples; no labels are read"
+    )
+    print(f"normalization {stats.method} [{stats.identity}]")
+    print(f"device: {device}")
+
+    run_id = args.run_id or f"pretrain-{split.identity}-s{config.train.seed}"
+    _, checkpoint, _ = pretrain_encoder(
+        config,
+        split,
+        train,
+        val,
+        device=device,
+        checkpoint_path=args.checkpoint,
+        run_id=run_id,
+    )
+    print(
+        f"\nselected epoch {checkpoint.epoch_selected + 1} with validation "
+        f"reconstruction loss {checkpoint.metric_value:.4f}"
+    )
+    print(f"parameters: {checkpoint.notes['n_parameters']}")
+    print(f"encoder written to {args.checkpoint}")
+    make_run_provenance(
+        run_id=run_id,
+        device=device,
+        seed=config.train.seed,
+        config=config.to_dict(),
+        split_id=split.identity,
+        channels=tuple(config.data.channels),
+        label_order=STAGES,
+        preprocessing_id=config.preprocessing_identity,
+        notes="self-supervised masked reconstruction; no labels read",
+        extra={
+            "objective": checkpoint.objective,
+            "pretrain_participants": list(checkpoint.pretrain_participants),
+            "checkpoint": str(args.checkpoint),
         },
     ).write(Path(args.checkpoint).with_suffix(".provenance.json"))
     return 0
@@ -650,6 +750,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     train2.set_defaults(func=cmd_train_d2)
+
+    pre = subparsers.add_parser(
+        "pretrain",
+        help="self-supervised masked reconstruction on training participants only",
+    )
+    common(pre)
+    pre.add_argument("--split", required=True)
+    pre.add_argument("--checkpoint", default="runs/pretrain/encoder.pt")
+    pre.add_argument("--device", default=None, help="cpu, cuda, mps or auto")
+    pre.add_argument("--seed", type=int)
+    pre.add_argument("--run-id")
+    pre.set_defaults(func=cmd_pretrain)
 
     predict_cmd = subparsers.add_parser("predict", help="save one prediction row per epoch")
     common(predict_cmd)

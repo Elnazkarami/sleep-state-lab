@@ -6,9 +6,10 @@
 | --- | --- |
 | D1 — epoch CNN | **implemented and trained** (synthetic and a six-participant real pilot) |
 | D2 — temporal transformer over 11 epochs | **implemented and trained** (synthetic and the same pilot) |
-| D3 — D2 with a self-supervised pretrained encoder | **specified below; not implemented** |
+| D3 — D2 with a self-supervised pretrained encoder | **implemented**; run on synthetic data and the pilot |
 | the label-budget benchmark | **not run** |
 | the required controls | **two of six implemented** (shuffled neighbours, masked context); the rest are listed below and not run |
+| the label-budget benchmark | **not run** |
 
 No checkpoint, score, or conclusion for D3 exists, and the D1-versus-D2 pilot
 numbers are not a comparison — the two were not given matched compute, which the
@@ -109,12 +110,21 @@ gradient at each step.
 
 ---
 
-## D3 — pretrained temporal model (specified, not implemented)
+## D3 — pretrained temporal model (implemented)
+
+Implemented as `sleepstatelab.models.pretrain` (the objective),
+`sleepstatelab.training.pretrain` (the loop), and `train-d2 --init-encoder`
+(the transfer). What follows was the contract and is now also the description;
+`tests/test_pretrain.py` asserts each rule rather than trusting this page.
+
+**Parameter count during pretraining: 509,608** — the encoder's 488,832 plus a
+20,776-parameter decoder that is thrown away afterwards.
 
 **Inference architecture is identical to D2.** Same encoder, same transformer,
 same context window, same masking. The *only* difference is that D3's epoch
 encoder starts from self-supervised masked reconstruction instead of random
-initialisation. If anything else differs, the comparison is void.
+initialisation. If anything else differs, the comparison is void. This is
+enforced by construction: D3 *is* `train-d2`, handed an encoder.
 
 **Pretraining task.** Masked reconstruction of raw EEG patches:
 
@@ -128,11 +138,19 @@ initialisation. If anything else differs, the comparison is void.
 * the loss is computed **only on masked, valid samples** — never on visible
   patches, never on samples belonging to an excluded epoch.
 
-**Pretraining uses training participants only.** No validation or test
-participant contributes a single sample to pretraining, and the pretraining
-manifest records exactly whose data it saw. A pretraining run that has seen the
-test participants is not a limited-label experiment; it is leakage with extra
-steps.
+**Pretraining uses training participants only.** The encoder checkpoint records
+exactly whose data it saw, and `load_encoder_checkpoint` refuses to hand it to a
+run that holds out any of them. The loop itself raises if it is given a dataset
+containing a held-out participant. A pretraining run that has seen the test
+participants is not a limited-label experiment; it is leakage with extra steps,
+and it is silent in every other respect -- the run trains, the numbers look
+good, and the claim is void.
+
+**Selection is on held-out reconstruction loss, never on a label.** The
+pretraining stage reads no stages at all: not for its objective, not for its
+stopping rule. The validation participants supply a reconstruction error and
+nothing else, computed under a fixed mask so two passes hide the same patches
+and their numbers can be compared.
 
 ---
 

@@ -24,7 +24,7 @@ anywhere else in this document.
 | shuffled-neighbour control | **implemented**, executed on real data |
 | context-masking control | **implemented**, executed on real data |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
-| D3 — D2 with a self-supervised pretrained encoder | **specified only** ([contract](docs/model_contracts.md)) — not implemented |
+| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data; real-data run in progress |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
 | the other five required controls | **not run** |
 | transition and single-channel analyses | **not run** |
@@ -358,6 +358,46 @@ model depends on that.
 
 ---
 
+## D3 — self-supervised pretraining
+
+D3 is not a third architecture. It is D2, with its encoder started from
+self-supervised masked reconstruction instead of random weights — which is why
+it is literally the same command: `train-d2 --init-encoder`.
+
+**The task.** Cut an epoch into patches, hide half of them, reconstruct what was
+hidden from what was left. No labels are read at any point, including for the
+stopping rule: pretraining selects on held-out *reconstruction* loss, computed
+under a fixed mask so two passes hide the same patches.
+
+**The property everything rests on: a hidden value never reaches the encoder.**
+Masking happens in signal space, before the encoder sees anything — hidden
+samples are *replaced* by a learned per-channel constant, not attenuated, not
+scaled. It is easy to write a masked autoencoder that leaks, and the leak is
+invisible in the loss curve: it looks like a model that is good at its task. So
+it is asserted directly. `test_hidden_values_never_reach_the_encoder` changes the
+signal inside the hidden patches and requires the encoder's input to be
+identical element for element; `test_hidden_values_do_not_move_the_embedding`
+requires the same of the representation.
+
+**The patch is derived from the encoder, not chosen** — one token per patch, 96
+samples, 0.96 s. The decoder reconstructs each patch from the token covering it,
+so a patch straddling tokens would ask an output block to answer for input it
+never saw. The first decoder written here interpolated tokens up to sample rate,
+which cannot represent anything above about half a hertz; sleep spindles are at
+12–16 Hz, so that encoder would have been trained to throw them away. A test now
+fits a 13 Hz signal and checks the residual. The tokens cover 2,976 of 3,000
+samples; the 24-sample tail is never masked and never scored.
+
+**The decoder is 20,776 parameters against the encoder's 488,832**, and is
+discarded afterwards. A strong decoder can reconstruct from a weak
+representation, which moves the work out of the only part that is kept.
+
+**Pretraining sees training participants only.** The encoder checkpoint records
+whose data it saw; loading it into a run that holds out any of them raises,
+rather than producing a result that looks fine and means nothing.
+
+---
+
 ## Evaluation
 
 **Primary metric: macro-F1 computed per participant, then averaged equally
@@ -576,13 +616,14 @@ experiment and it is not evidence about sleep.
 
 ## What is not claimed
 
-* No result for D2, D3, pretraining, label budgets, transitions, or channel
-  ablations exists. Those are contracts in
-  [docs/model_contracts.md](docs/model_contracts.md), and the controls that must
-  accompany them — a pretrained CNN without context, frozen random versus frozen
-  pretrained probes, a compute-matched longer-trained D2, a temporal-smoothing
-  baseline, shuffled-neighbour controls, and one-channel models trained as such
-  — are listed there and have not been run.
+* **No benchmark result exists.** D1, D2 and D3 have each been trained and
+  scored, but on six participants with one in the test set. Four of the six
+  required controls have not been run: a pretrained CNN without temporal
+  context, frozen random versus frozen pretrained probes with the same probe, a
+  D1-plus-temporal-smoothing baseline, and one-channel models trained as such.
+  The 10% / 25% / 100% label-budget comparison — the thing this repository is
+  built to measure — has not been run at all. They are specified in
+  [docs/model_contracts.md](docs/model_contracts.md).
 * Nothing here claims sleep stages are attractors, that transitions are
   bifurcations, or that any embedding structure is a mechanism or a clinically
   useful biomarker. Classification performance and a two-dimensional projection
@@ -608,10 +649,12 @@ src/sleepstatelab/
                     preprocessing, splits, cache preparation, audit report
   features/         spectral features (classical baselines only)
   baselines/        class prior, logistic regression, random forest
-  models/           the epoch encoder, D1, and D2's temporal stack
-  training/         epoch dataset, context windows, trainer, checkpoints
+  models/           the epoch encoder, D1, D2's temporal stack, and the
+                    masked-reconstruction objective D3 pretrains with
+  training/         epoch dataset, context windows and segments, the shared
+                    trainer, self-supervised pretraining, checkpoints
   evaluation/       saved predictions, metrics, generated report tables
-tests/              88 tests: synthetic, real-data-free, CPU
+tests/              synthetic, real-data-free, CPU
 docs/               data audit, model contracts, evaluation, PhysioML reuse
 ```
 
