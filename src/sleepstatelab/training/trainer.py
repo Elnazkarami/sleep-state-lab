@@ -71,12 +71,36 @@ def encoder_kwargs(config: Config) -> dict[str, Any]:
     }
 
 
-def build_model(config: Config) -> D1Classifier:
+def build_model(config: Config, *, encoder: EpochEncoder | None = None) -> D1Classifier:
+    """D1 with a fresh or supplied encoder.
+
+    A supplied encoder is how a pretrained backbone reaches D1, which is the
+    control that asks whether a gain came from the representation or only from
+    having a temporal model on top of it.
+    """
     return D1Classifier.from_encoder(
-        EpochEncoder(**encoder_kwargs(config)),
+        encoder if encoder is not None else EpochEncoder(**encoder_kwargs(config)),
         n_classes=config.model.n_classes,
         dropout=config.model.dropout,
     )
+
+
+def freeze(module: nn.Module) -> int:
+    """Stop a submodule training, and report how many parameters were frozen.
+
+    Used for the probe controls: a frozen random encoder against a frozen
+    pretrained one, with the same head trained on each, isolates what the
+    representation carries from what fine-tuning can find. The optimiser is
+    given only the parameters that still require gradients, so a frozen encoder
+    is not merely receiving zero updates -- it is not in the optimiser at all,
+    and weight decay cannot touch it either.
+    """
+    frozen = 0
+    for parameter in module.parameters():
+        if parameter.requires_grad:
+            parameter.requires_grad_(False)
+            frozen += int(parameter.numel())
+    return frozen
 
 
 def split_batch(batch: Sequence[Any], device: str) -> tuple[list[torch.Tensor], torch.Tensor]:
@@ -184,6 +208,8 @@ def train_d1(
     train: Any,
     val: Any,
     *,
+    encoder: EpochEncoder | None = None,
+    freeze_encoder: bool = False,
     device: str = "cpu",
     checkpoint_path: Path | str | None = None,
     run_id: str = "d1",
@@ -195,9 +221,10 @@ def train_d1(
         split,
         train,
         val,
-        model=build_model(config),
+        model=build_model(config, encoder=encoder),
         model_name="D1",
         temporal_kwargs={},
+        freeze_encoder=freeze_encoder,
         device=device,
         checkpoint_path=checkpoint_path,
         run_id=run_id,
@@ -250,6 +277,7 @@ def train_d2(
     val: Any,
     *,
     encoder: EpochEncoder | None = None,
+    freeze_encoder: bool = False,
     device: str = "cpu",
     checkpoint_path: Path | str | None = None,
     run_id: str = "d2",
@@ -265,6 +293,7 @@ def train_d2(
         model=build_d2(config, encoder=encoder),
         model_name="D2",
         temporal_kwargs=temporal_kwargs_of(config),
+        freeze_encoder=freeze_encoder,
         device=device,
         checkpoint_path=checkpoint_path,
         run_id=run_id,
@@ -282,6 +311,7 @@ def train_supervised(
     model: nn.Module,
     model_name: str,
     temporal_kwargs: dict[str, Any],
+    freeze_encoder: bool = False,
     device: str = "cpu",
     checkpoint_path: Path | str | None = None,
     run_id: str = "run",
@@ -301,13 +331,16 @@ def train_supervised(
     """
     seed_everything(config.train.seed)
     model = model.to(device)
+    frozen = freeze(model.encoder) if freeze_encoder else 0
+    if frozen and progress:
+        print(f"  encoder frozen: {frozen} parameters excluded from the optimiser")
 
     weights = torch.tensor(
         train.class_weights(config.train.class_weighting), dtype=torch.float32, device=device
     )
     criterion = nn.CrossEntropyLoss(weight=weights, ignore_index=IGNORE_LABEL)
     optimiser = torch.optim.AdamW(
-        model.parameters(),
+        [p for p in model.parameters() if p.requires_grad],
         lr=config.train.learning_rate,
         weight_decay=config.train.weight_decay,
     )
@@ -425,6 +458,7 @@ def train_supervised(
             ),
             "train_items_available": len(train),
             "truncated_batches_per_epoch": config.train.max_train_batches or None,
+            "frozen_encoder_parameters": frozen,
             "loader_batch_size": loader_batch_size or config.train.batch_size,
             "examples_per_step": config.train.batch_size,
         },

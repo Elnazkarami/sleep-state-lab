@@ -63,9 +63,18 @@ def test_batchnorm_is_not_used():
 @pytest.mark.slow
 def test_d1_can_overfit_a_tiny_batch():
     """An optimisation check, not an experiment: a network that cannot memorise
-    sixteen examples has a broken gradient path."""
+    sixteen examples has a broken gradient path.
+
+    Judged by how far the loss falls, not by where it lands. The identical
+    seeded run reaches 0.002 on one machine and 0.062 on another -- same code,
+    different BLAS -- and an absolute threshold between those two numbers tests
+    the runner rather than the model. A broken gradient path does not produce a
+    fifty-fold reduction; it produces none.
+    """
     from sleepstatelab.smoke import overfit_check
 
     found = overfit_check(n=16, steps=250, device="cpu", seed=0)
     assert found["train_accuracy"] == 1.0
-    assert found["final_loss"] < 0.05
+    assert found["loss_reduction"] > 20.0, (
+        f"loss went {found['initial_loss']:.4f} -> {found['final_loss']:.4f}"
+    )

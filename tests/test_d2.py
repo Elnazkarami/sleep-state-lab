@@ -290,17 +290,24 @@ def test_d2_can_overfit_a_tiny_batch():
     targets = torch.from_numpy(y)
 
     model.train()
-    for _ in range(200):
+    first = None
+    for step in range(200):
         optimiser.zero_grad(set_to_none=True)
         loss = criterion(model(inputs, mask), targets)
         loss.backward()
         optimiser.step()
+        if step == 0:
+            first = float(loss.item())
 
     model.eval()
     with torch.no_grad():
         accuracy = float((model(inputs, mask).argmax(dim=1) == targets).float().mean())
     assert accuracy == 1.0
-    assert float(loss.item()) < 0.05
+    # Relative, for the reason given in test_models.py: an absolute loss floor
+    # measures the machine's arithmetic as much as the model's optimisation.
+    assert first / float(loss.item()) > 20.0, (
+        f"loss went {first:.4f} -> {float(loss.item()):.4f}"
+    )
 
 
 # --------------------------------------------------------------------------
