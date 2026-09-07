@@ -13,6 +13,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -234,6 +235,62 @@ def cmd_baselines(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_initial_encoder(args: argparse.Namespace, config: Config, split: Any) -> tuple[Any, Any]:
+    """The encoder a run starts from, and a record of where it came from.
+
+    Accepts either a bare self-supervised encoder or the encoder inside a
+    supervised checkpoint, and refuses a pretrained one that has seen this run's
+    held-out participants. What was loaded is written into the run's provenance,
+    so a run started from a pretrained backbone can never be mistaken for one
+    started from random weights -- which is the entire difference between D3 and
+    D2.
+    """
+    from sleepstatelab.training.checkpoint import (
+        is_encoder_checkpoint,
+        load_checkpoint,
+        load_encoder_checkpoint,
+    )
+
+    if not getattr(args, "init_encoder", None):
+        return None, None
+
+    if is_encoder_checkpoint(args.init_encoder):
+        encoder, source = load_encoder_checkpoint(
+            args.init_encoder,
+            expect_channels=tuple(config.data.channels),
+            expect_preprocessing_id=config.preprocessing_identity,
+            forbid_participants=tuple(split.val) + tuple(split.test),
+        )
+        record = {
+            "path": str(args.init_encoder),
+            "kind": "self-supervised encoder",
+            "objective": source.objective,
+            "pretrain_participants": list(source.pretrain_participants),
+            "run_id": source.notes.get("run_id", "unknown"),
+        }
+        print(
+            f"encoder initialised from {args.init_encoder}: {source.objective}, "
+            f"pretrained on {', '.join(source.pretrain_participants)}"
+        )
+        return encoder, record
+
+    model, source_checkpoint = load_checkpoint(
+        args.init_encoder,
+        expect_channels=tuple(config.data.channels),
+        expect_preprocessing_id=config.preprocessing_identity,
+    )
+    record = {
+        "path": str(args.init_encoder),
+        "kind": f"supervised {source_checkpoint.model_name}",
+        "run_id": source_checkpoint.notes.get("run_id", "unknown"),
+    }
+    print(
+        f"encoder initialised from {args.init_encoder} "
+        f"({source_checkpoint.model_name}, run {record['run_id']})"
+    )
+    return model.encoder, record
+
+
 def cmd_train_d1(args: argparse.Namespace) -> int:
     """Train D1 and save its checkpoint."""
     from sleepstatelab.data.splits import Split, label_budget_subsets
@@ -256,6 +313,14 @@ def cmd_train_d1(args: argparse.Namespace) -> int:
             "Validation labels are NOT reduced."
         )
 
+    encoder, initialised_from = _load_initial_encoder(args, config, split)
+    if args.freeze_encoder:
+        print(
+            "encoder frozen: only the head trains. This is the probe control -- "
+            "it measures what the representation already carries, not what "
+            "fine-tuning can find in it."
+        )
+
     train, val, test, stats = build_datasets(
         config, split, train_participants=budget_participants
     )
@@ -275,6 +340,8 @@ def cmd_train_d1(args: argparse.Namespace) -> int:
         split,
         train,
         val,
+        encoder=encoder,
+        freeze_encoder=args.freeze_encoder,
         device=device,
         checkpoint_path=args.checkpoint,
         run_id=run_id,
@@ -295,7 +362,12 @@ def cmd_train_d1(args: argparse.Namespace) -> int:
         label_order=STAGES,
         preprocessing_id=config.preprocessing_identity,
         notes="D1 supervised training",
-        extra={"label_budget": args.label_budget, "checkpoint": str(args.checkpoint)},
+        extra={
+            "label_budget": args.label_budget,
+            "checkpoint": str(args.checkpoint),
+            "init_encoder": initialised_from,
+            "frozen_encoder": args.freeze_encoder,
+        },
     ).write(Path(args.checkpoint).with_suffix(".provenance.json"))
     return 0
 
@@ -304,7 +376,6 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
     """Train D2: the same encoder, with a transformer over eleven epochs."""
     from sleepstatelab.data.splits import Split, label_budget_subsets
     from sleepstatelab.provenance import make_run_provenance
-    from sleepstatelab.training.checkpoint import load_checkpoint
     from sleepstatelab.training.trainer import train_d2
     from sleepstatelab.training.windows import build_window_datasets
 
@@ -323,53 +394,7 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
             "Validation labels are NOT reduced."
         )
 
-    encoder = None
-    initialised_from = None
-    if args.init_encoder:
-        # The route a pretrained backbone takes into D2 -- this is D3. What is
-        # loaded is named in the checkpoint, so a run started from a pretrained
-        # encoder can never be mistaken for one started from random weights.
-        from sleepstatelab.training.checkpoint import (
-            is_encoder_checkpoint,
-            load_encoder_checkpoint,
-        )
-
-        if is_encoder_checkpoint(args.init_encoder):
-            encoder, source_encoder = load_encoder_checkpoint(
-                args.init_encoder,
-                expect_channels=tuple(config.data.channels),
-                expect_preprocessing_id=config.preprocessing_identity,
-                forbid_participants=tuple(split.val) + tuple(split.test),
-            )
-            initialised_from = {
-                "path": str(args.init_encoder),
-                "kind": "self-supervised encoder",
-                "objective": source_encoder.objective,
-                "pretrain_participants": list(source_encoder.pretrain_participants),
-                "run_id": source_encoder.notes.get("run_id", "unknown"),
-            }
-            print(
-                f"encoder initialised from {args.init_encoder}: "
-                f"{source_encoder.objective}, pretrained on "
-                f"{', '.join(source_encoder.pretrain_participants)}"
-            )
-        else:
-            source, source_checkpoint = load_checkpoint(
-                args.init_encoder,
-                expect_channels=tuple(config.data.channels),
-                expect_preprocessing_id=config.preprocessing_identity,
-            )
-            encoder = source.encoder
-            initialised_from = {
-                "path": str(args.init_encoder),
-                "kind": f"supervised {source_checkpoint.model_name}",
-                "run_id": source_checkpoint.notes.get("run_id", "unknown"),
-            }
-            print(
-                f"encoder initialised from {args.init_encoder} "
-                f"({source_checkpoint.model_name}, run "
-                f"{source_checkpoint.notes.get('run_id', 'unknown')})"
-            )
+    encoder, initialised_from = _load_initial_encoder(args, config, split)
 
     segments = not args.no_segments
     centres = config.model.centres_per_segment
@@ -423,6 +448,7 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
         train,
         val,
         encoder=encoder,
+        freeze_encoder=args.freeze_encoder,
         device=device,
         checkpoint_path=args.checkpoint,
         run_id=run_id,
@@ -450,6 +476,7 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
             "init_encoder": initialised_from,
             "context_epochs": config.model.context_epochs,
             "context_coverage_train": train.context_coverage(),
+            "frozen_encoder": args.freeze_encoder,
             "shared_encodings": segments,
             "centres_per_segment": centres if segments else None,
         },
@@ -625,6 +652,81 @@ def cmd_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_smooth(args: argparse.Namespace) -> int:
+    """Decode a saved model's predictions through a training-fitted transition table."""
+    from sleepstatelab.baselines.smoothing import (
+        fit_transitions,
+        smooth_probabilities,
+        write_transition_model,
+    )
+    from sleepstatelab.data.prepare import load_cached, reject_mask_flags
+    from sleepstatelab.data.splits import Split
+    from sleepstatelab.evaluation.predictions import PredictionWriter, read_predictions
+
+    config = _with_overrides(load(args.config), args)
+    split = Split.read(args.split)
+    reject = reject_mask_flags(tuple(config.preprocess.qc_reject))
+
+    # Fitted on the training participants' labels only. This is a model, and it
+    # is held to the same rule as every other model here.
+    training = load_cached(config, split.train)
+    labelled = []
+    participants = []
+    for record in training:
+        keep = record.eligible(reject)
+        if keep.any():
+            labelled.append((record.epoch_index[keep], record.labels[keep]))
+            participants.append(record.participant_id)
+    transitions = fit_transitions(labelled, participants)
+    print(f"transition model: {transitions.summary()}")
+    print(f"fitted on: {', '.join(transitions.fitted_on)}")
+
+    rows = read_predictions(args.predictions)
+    source = [r for r in rows if r["model"] == args.model and r["split_part"] == args.part]
+    if not source:
+        raise SystemExit(
+            f"{args.predictions} holds no rows for model {args.model!r} in part "
+            f"{args.part!r}"
+        )
+    leaked = {r["participant_id"] for r in source} & set(transitions.fitted_on)
+    if leaked:
+        raise SystemExit(
+            f"refusing to smooth: the transition table was fitted on "
+            f"{sorted(leaked)}, who also appear in the predictions being smoothed"
+        )
+
+    by_recording: dict[str, list[dict[str, Any]]] = {}
+    for row in source:
+        by_recording.setdefault(row["recording_id"], []).append(row)
+
+    written = 0
+    with PredictionWriter(args.output, overwrite=not args.append) as writer:
+        for recording_id, block in sorted(by_recording.items()):
+            block.sort(key=lambda row: row["epoch_index"])
+            index = np.array([row["epoch_index"] for row in block])
+            probabilities = np.array(
+                [[row[f"p_{name}"] for name in STAGES] for row in block]
+            )
+            decoded = smooth_probabilities(probabilities, index, transitions)
+            writer.write(
+                run_id=block[0]["run_id"],
+                model=args.name or f"{args.model}+smoothing",
+                split_id=block[0]["split_id"],
+                split_part=args.part,
+                seed=block[0]["seed"],
+                participant_ids=[row["participant_id"] for row in block],
+                recording_ids=[recording_id] * len(block),
+                epoch_indices=index,
+                true_labels=np.array([row["true_label"] for row in block]),
+                probabilities=decoded,
+                qc_flags=np.array([row["qc_flags"] for row in block]),
+            )
+            written += len(block)
+    write_transition_model(Path(args.output).with_suffix(".transitions.json"), transitions)
+    print(f"{written} smoothed predictions written to {args.output}")
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     """Build the report tables from saved predictions."""
     from sleepstatelab.evaluation.metrics import evaluate_predictions
@@ -727,6 +829,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="train on a nested subset of the training participants (0-1]",
     )
+    train.add_argument(
+        "--init-encoder",
+        help=(
+            "checkpoint whose encoder initialises this one -- a pretrained "
+            "encoder here is the control that asks whether a gain came from the "
+            "representation or from having a temporal model on top of it"
+        ),
+    )
+    train.add_argument("--freeze-encoder", action="store_true", help='control: train only the head, leaving the encoder exactly as it was loaded. A frozen random encoder against a frozen pretrained one, with the same head on each, is what separates what a representation carries from what fine-tuning can find in it.')
     train.set_defaults(func=cmd_train_d1)
 
     train2 = subparsers.add_parser(
@@ -748,6 +859,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="train on a nested subset of the training participants (0-1]",
     )
+    train2.add_argument("--freeze-encoder", action="store_true", help='control: train only the head, leaving the encoder exactly as it was loaded. A frozen random encoder against a frozen pretrained one, with the same head on each, is what separates what a representation carries from what fine-tuning can find in it.')
     train2.add_argument(
         "--no-segments",
         action="store_true",
@@ -795,6 +907,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     predict_cmd.set_defaults(func=cmd_predict)
+
+    smooth = subparsers.add_parser(
+        "smooth",
+        help=(
+            "control: decode a saved model's predictions through a transition "
+            "table fitted on the training participants"
+        ),
+    )
+    common(smooth)
+    smooth.add_argument("predictions")
+    smooth.add_argument("--split", required=True)
+    smooth.add_argument("--model", default="D1", help="which saved model to smooth")
+    smooth.add_argument("--part", default="test", choices=("train", "val", "test"))
+    smooth.add_argument("--output", default="outputs/predictions_smoothed.csv")
+    smooth.add_argument("--name", help="model name to save under")
+    smooth.add_argument("--append", action="store_true")
+    smooth.set_defaults(func=cmd_smooth)
 
     report = subparsers.add_parser("report", help="build tables from saved predictions")
     report.add_argument("predictions")

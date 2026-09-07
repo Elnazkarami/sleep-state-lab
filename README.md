@@ -515,6 +515,41 @@ one test participant is not a setting in which an absence of evidence means very
 much. The validation score swung between 0.33 and 0.80 across passes, so
 checkpoint selection here is substantially noise.
 
+#### A transition table beats both temporal models here
+
+The fourth required control asks how much of a temporal model's advantage is
+already available from a table of transition counts. `sleepstatelab smooth` fits
+a 5×5 transition matrix on the training participants' labels — nothing else —
+and Viterbi-decodes a single-epoch model's saved probabilities through it, one
+run of consecutive epochs at a time, never across a gap.
+
+Fitted on the four training participants: 22,080 transitions, P(stay) of 0.993
+for Wake, 0.938 REM, 0.893 N2, 0.847 N3, 0.630 N1 — sleep persists, and N1 is
+the stage that does not.
+
+| model | participant macro-F1 | Cohen's κ |
+| --- | ---: | ---: |
+| D1 + training-fitted smoothing | **0.719** | 0.749 |
+| random forest | 0.717 | 0.757 |
+| D1 | 0.702 | 0.743 |
+| D3 | 0.675 | 0.740 |
+| D2 | 0.576 | 0.614 |
+
+On this participant, **a table of transition counts uses temporal structure
+better than the transformer does**. It costs nothing to fit, reads no signal,
+and is applied after the fact to predictions that already exist.
+
+That is the outcome this control exists to be able to report, and it is a
+standing challenge to every temporal result that follows: a context model has to
+beat D1-plus-smoothing, not merely D1.
+
+Whether it holds is unknown. This is one held-out participant, and the ordering
+of five models that span 0.14 macro-F1 on one person's night is not something to
+carry forward as a finding. What it does establish is that the comparison is now
+*possible* — the control is implemented, runs from saved predictions, and will
+be part of the benchmark rather than an afterthought once someone asks why a
+transformer was needed.
+
 #### D2, per stage
 
 | stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |

@@ -30,6 +30,7 @@ EXPECTED = {
     "train-d2",
     "pretrain",
     "predict",
+    "smooth",
     "report",
     "smoke",
 }
