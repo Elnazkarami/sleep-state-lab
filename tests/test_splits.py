@@ -67,3 +67,55 @@ def test_written_split_detects_editing(tmp_path):
     path.write_text(text)
     with pytest.raises(SplitError):
         Split.read(path)
+
+
+def test_a_split_records_the_recordings_it_was_built_on():
+    split = grouped_split(
+        ["SC400", "SC401", "SC402"],
+        seed=0,
+        recordings=["SC400-n1", "SC400-n2", "SC401-n1", "SC402-n1"],
+    )
+    assert split.recordings == ("SC400-n1", "SC400-n2", "SC401-n1", "SC402-n1")
+
+
+def test_a_cache_that_gained_a_recording_is_refused():
+    """The failure this exists for: the epoch cache is keyed by preprocessing,
+    so preparing more recordings later adds them to the same directory. A split
+    naming SC404 then covers two nights where it covered one, and a result
+    computed after is not comparable with one computed before."""
+    split = grouped_split(
+        ["SC400", "SC401", "SC402"],
+        seed=0,
+        recordings=["SC400-n1", "SC401-n1", "SC402-n1"],
+    )
+    part = split.part_of("SC400")
+    split.check_recordings(part, ("SC400-n1",))
+    with pytest.raises(SplitError, match="no longer matches"):
+        split.check_recordings(part, ("SC400-n1", "SC400-n2"))
+
+
+def test_a_split_without_recorded_recordings_skips_the_check():
+    """Splits written before this was recorded stay usable, unchecked rather
+    than guessed at."""
+    split = grouped_split(["SC400", "SC401", "SC402"], seed=0)
+    assert split.recordings == ()
+    split.check_recordings("test", ("anything-n9",))
+
+
+def test_recordings_do_not_change_the_split_identity():
+    """Identity answers "same people, same sides", which is what a checkpoint
+    needs. Adding a field to the file must not invalidate existing checkpoints."""
+    plain = grouped_split(["SC400", "SC401", "SC402"], seed=0)
+    with_recordings = grouped_split(
+        ["SC400", "SC401", "SC402"], seed=0, recordings=["SC400-n1"]
+    )
+    assert plain.identity == with_recordings.identity
+
+
+def test_recordings_survive_a_round_trip(tmp_path):
+    split = grouped_split(
+        ["SC400", "SC401", "SC402"], seed=0, recordings=["SC400-n1", "SC401-n1"]
+    )
+    path = tmp_path / "split.json"
+    split.write(path)
+    assert Split.read(path).recordings == split.recordings

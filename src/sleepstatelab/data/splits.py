@@ -38,12 +38,28 @@ class Split:
     train: tuple[str, ...]
     val: tuple[str, ...]
     test: tuple[str, ...]
+    recordings: tuple[str, ...] = ()
+    """The recording ids the cache held when this split was made.
+
+    Participants are not enough to pin down an evaluation set. The epoch cache
+    is keyed by preprocessing, so preparing more recordings later adds them to
+    the same directory -- and a split naming participant SC404 then quietly
+    covers two nights where it used to cover one. That happened here: a pilot's
+    test set doubled in size between one model's predictions and the next's, and
+    nothing in either file said so.
+
+    Empty means a split written before this was recorded, and the check is
+    skipped rather than guessed at."""
 
     def __post_init__(self) -> None:
         self.check()
 
     @property
     def identity(self) -> str:
+        """Hash of the three participant lists. Deliberately not of
+        ``recordings``: the identity answers "are these the same people on the
+        same sides", which is what a checkpoint needs to be comparable, and it
+        must not change when a split file gains a field."""
         return digest(
             {
                 "strategy": self.strategy,
@@ -51,6 +67,26 @@ class Split:
                 "val": sorted(self.val),
                 "test": sorted(self.test),
             }
+        )
+
+    def check_recordings(self, part: str, found: tuple[str, ...]) -> None:
+        """Refuse a cache that no longer holds what this split was built on."""
+        if not self.recordings:
+            return
+        expected = {
+            r for r in self.recordings if r.split("-n")[0] in set(getattr(self, part))
+        }
+        actual = set(found)
+        if expected == actual:
+            return
+        added = sorted(actual - expected)
+        missing = sorted(expected - actual)
+        raise SplitError(
+            f"the epoch cache no longer matches split {self.name!r} for its "
+            f"{part} participants: {len(added)} recording(s) added {added[:5]}, "
+            f"{len(missing)} missing {missing[:5]}. A result computed now would "
+            "not be comparable with one computed before. Regenerate the split, "
+            "or point --cache-dir at the cache this split was made from."
         )
 
     @property
@@ -101,6 +137,7 @@ class Split:
             train=tuple(payload["train"]),
             val=tuple(payload["val"]),
             test=tuple(payload["test"]),
+            recordings=tuple(payload.get("recordings", ())),
         )
         stored = payload.get("identity")
         if stored and stored != split.identity:
@@ -118,6 +155,7 @@ def grouped_split(
     train_fraction: float = 0.6,
     val_fraction: float = 0.2,
     name: str = "grouped",
+    recordings: tuple[str, ...] | list[str] | None = None,
 ) -> Split:
     """A deterministic participant-disjoint three-way split.
 
@@ -156,7 +194,13 @@ def grouped_split(
     val = tuple(sorted(shuffled[n_test : n_test + n_val]))
     train = tuple(sorted(shuffled[n_test + n_val :]))
     return Split(
-        name=name, seed=seed, strategy="grouped_random", train=train, val=val, test=test
+        name=name,
+        seed=seed,
+        strategy="grouped_random",
+        train=train,
+        val=val,
+        test=test,
+        recordings=tuple(recordings or ()),
     )
 
 

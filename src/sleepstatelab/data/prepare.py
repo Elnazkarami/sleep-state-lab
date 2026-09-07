@@ -215,11 +215,28 @@ def load_cached(config: Config, participants: tuple[str, ...] | None = None) -> 
         raise FileNotFoundError(
             f"no epoch cache at {target}. Run `sleepstatelab prepare` first."
         )
+    # The configuration decides which cohort an experiment is, and loading has
+    # to honour it. The cache is keyed by preprocessing, not by cohort, so it
+    # accumulates: preparing the full dataset puts every participant and every
+    # night into the same directory. Filtering only by the participants a caller
+    # asks for is not enough -- a pilot pinned to first nights would still pick
+    # up second nights that were prepared later, and did, silently doubling an
+    # evaluation set between one model's predictions and the next's.
     wanted = set(participants) if participants is not None else None
+    configured = set(config.data.participants) or None
+    nights = set(config.data.nights) if config.data.nights else None
+
     found: list[EpochedRecording] = []
+    skipped = 0
     for path in sorted(target.glob("*.npz")):
         record = EpochedRecording.load(path)
         if wanted is not None and record.participant_id not in wanted:
+            continue
+        if configured is not None and record.participant_id not in configured:
+            skipped += 1
+            continue
+        if nights is not None and record.night not in nights:
+            skipped += 1
             continue
         if tuple(record.channels) != tuple(config.data.channels):
             raise ValueError(
@@ -231,5 +248,11 @@ def load_cached(config: Config, participants: tuple[str, ...] | None = None) -> 
         raise FileNotFoundError(
             f"no cached recordings under {target}"
             + (f" for participants {sorted(wanted)}" if wanted else "")
+            + (
+                f"; {skipped} cached recording(s) were excluded by the "
+                "configuration's participants/nights"
+                if skipped
+                else ""
+            )
         )
     return found

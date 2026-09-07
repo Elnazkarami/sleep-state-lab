@@ -130,16 +130,19 @@ def cmd_split(args: argparse.Namespace) -> int:
     from sleepstatelab.data.splits import grouped_split, label_budget_subsets
 
     config = _with_overrides(load(args.config), args)
-    participants = sorted({record.participant_id for record in load_cached(config)})
+    cached = load_cached(config)
+    participants = sorted({record.participant_id for record in cached})
     split = grouped_split(
         participants,
         seed=config.split.seed,
         train_fraction=config.split.train_fraction,
         val_fraction=config.split.val_fraction,
         name=args.name,
+        recordings=sorted(record.recording_id for record in cached),
     )
     split.write(args.output)
     print(split.summary())
+    print(f"covering {len(split.recordings)} recording(s) in the cache")
     print(f"train: {', '.join(split.train)}")
     print(f"val:   {', '.join(split.val)}")
     print(f"test:  {', '.join(split.test)}")

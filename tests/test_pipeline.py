@@ -187,3 +187,54 @@ def test_prepare_reports_completion_when_there_is_room(small_config):
     assert report.stopped_early == ""
     assert report.recordings == report.recordings_discovered
     assert "INCOMPLETE" not in report.summary()
+
+
+def test_load_cached_honours_the_configured_nights(small_config, tmp_path):
+    """The cache accumulates -- it is keyed by preprocessing, not by cohort --
+    so an experiment pinned to first nights must not pick up second nights that
+    were prepared later. This silently doubled an evaluation set once."""
+    import dataclasses
+
+    from sleepstatelab.data.prepare import load_cached, prepare
+    from sleepstatelab.synthetic import make_cohort
+
+    root = tmp_path / "edf"
+    make_cohort(root, n_participants=3, nights=(1, 2), n_epochs=24, seed=11)
+    config = dataclasses.replace(
+        small_config,
+        data=dataclasses.replace(
+            small_config.data, root=str(root), cache_dir=str(tmp_path / "cache")
+        ),
+    )
+    prepare(config, progress=False)
+    assert len(load_cached(config)) == 6
+
+    first_nights = dataclasses.replace(
+        config, data=dataclasses.replace(config.data, nights=(1,))
+    )
+    loaded = load_cached(first_nights)
+    assert len(loaded) == 3
+    assert all(record.night == 1 for record in loaded)
+
+
+def test_load_cached_honours_the_configured_participants(small_config, tmp_path):
+    import dataclasses
+
+    from sleepstatelab.data.prepare import load_cached, prepare
+    from sleepstatelab.synthetic import make_cohort
+
+    root = tmp_path / "edf"
+    make_cohort(root, n_participants=4, n_epochs=24, seed=12)
+    config = dataclasses.replace(
+        small_config,
+        data=dataclasses.replace(
+            small_config.data, root=str(root), cache_dir=str(tmp_path / "cache")
+        ),
+    )
+    prepare(config, progress=False)
+    assert len(load_cached(config)) == 4
+
+    two = dataclasses.replace(
+        config, data=dataclasses.replace(config.data, participants=("SC400", "SC402"))
+    )
+    assert sorted(r.participant_id for r in load_cached(two)) == ["SC400", "SC402"]

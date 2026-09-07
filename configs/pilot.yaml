@@ -12,7 +12,15 @@ data:
   channels: ["EEG Fpz-Cz", "EEG Pz-Oz"]
   sampling_rate_hz: 100.0
   epoch_seconds: 30.0
-  nights: [1, 2]
+  # Pinned, both of them. The pilot was run on the first night of six
+  # participants, and the epoch cache is shared by preprocessing identity -- so
+  # once the full cohort was prepared into the same directory, an unpinned pilot
+  # config silently picked up second nights and every participant present. That
+  # happened, and it made one model's predictions cover twice the epochs of
+  # another's. Naming the cohort here keeps the pilot reproducible whatever else
+  # the cache comes to hold.
+  nights: [1]
+  participants: ["SC400", "SC401", "SC402", "SC403", "SC404", "SC405"]
 
 preprocess:
   normalization: train_robust_channel

@@ -155,6 +155,14 @@ def build_datasets(
     val_records = load_cached(config, split.val) if split.val else []
     test_records = load_cached(config, split.test)
 
+    # The cache can gain recordings after a split was written -- it is keyed by
+    # preprocessing, not by cohort -- and a test set that quietly doubles makes
+    # two results incomparable while both look fine.
+    if train_participants is None:
+        split.check_recordings("train", tuple(r.recording_id for r in train_records))
+    split.check_recordings("val", tuple(r.recording_id for r in val_records))
+    split.check_recordings("test", tuple(r.recording_id for r in test_records))
+
     if stats is None:
         filtered = []
         participants = []
