@@ -1,0 +1,38 @@
+# The sixth required control: a model trained on one derivation.
+#
+# This is deliberately a separate configuration rather than a flag, because it
+# is a separate experiment with its own epoch cache. Its preprocessing identity
+# differs from the two-channel one, so `prepare` writes to a different directory
+# and nothing can accidentally evaluate a one-channel model on two-channel
+# epochs.
+#
+# Keep this distinct from channel *loss*: a model trained on Fpz-Cz alone has
+# learned to work with what it has, while a two-channel model that meets a dead
+# electrode at inference has not. `predict --drop-channel` is that other
+# question, and the two must never be reported as the same number.
+name: one-channel-fpz
+
+data:
+  root: data/sleep-edf
+  cache_dir: cache/epochs
+  channels: ["EEG Fpz-Cz"]
+  sampling_rate_hz: 100.0
+  epoch_seconds: 30.0
+  nights: [1, 2]
+
+preprocess:
+  normalization: train_robust_channel
+  sleep_window: false
+
+split:
+  seed: 20260901
+  train_fraction: 0.6
+  val_fraction: 0.2
+
+train:
+  device: cpu
+  seed: 0
+  epochs: 30
+  batch_size: 64
+  learning_rate: 0.001
+  early_stopping_patience: 6

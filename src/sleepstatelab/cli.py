@@ -636,6 +636,33 @@ def cmd_predict(args: argparse.Namespace) -> int:
             "model is not using the ORDER of its context -- which is not the same "
             "as not using the context."
         )
+    if args.drop_channel is not None:
+        # Channel *loss*, which is a different question from a model trained on
+        # one channel. This one asks what happens to a two-channel model when an
+        # electrode dies at inference: it was never trained for that, and the
+        # answer is usually much worse than a model that learned to work with
+        # one derivation. The two are saved under different model names and this
+        # package will not let them be confused.
+        if args.drop_channel >= len(config.data.channels):
+            raise SystemExit(
+                f"--drop-channel {args.drop_channel} but this model has "
+                f"{len(config.data.channels)} channel(s)"
+            )
+        dropped = config.data.channels[args.drop_channel]
+        blocks = getattr(dataset, "blocks", None)
+        if blocks is None:
+            dataset.x = np.array(dataset.x)
+            dataset.x[:, args.drop_channel, :] = 0.0
+        else:
+            dataset.blocks = [np.array(block) for block in blocks]
+            for block in dataset.blocks:
+                block[:, args.drop_channel, :] = 0.0
+        print(
+            f"CONTROL RUN: channel {args.drop_channel} ({dropped}) is zeroed at "
+            "inference. This is unexpected channel loss, NOT a model trained on "
+            "one channel -- do not report them as the same result."
+        )
+
     if args.mask_context:
         from sleepstatelab.training.windows import mask_context
 
@@ -915,6 +942,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="control: shuffle the non-central context positions before predicting",
     )
     predict_cmd.add_argument("--shuffle-seed", type=int, default=0)
+    predict_cmd.add_argument(
+        "--drop-channel",
+        type=int,
+        help=(
+            "control: zero this channel at inference, simulating an electrode "
+            "that died. Distinct from training on one channel; see "
+            "configs/one_channel.yaml"
+        ),
+    )
     predict_cmd.add_argument(
         "--mask-context",
         action="store_true",

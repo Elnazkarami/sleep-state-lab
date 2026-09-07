@@ -120,3 +120,52 @@ def test_training_records_that_the_encoder_was_frozen(small_config, tmp_path):
         progress=False,
     )
     assert checkpoint.notes["frozen_encoder_parameters"] > 0
+
+
+def test_a_one_channel_configuration_is_a_separate_experiment():
+    """It must get its own epoch cache. A one-channel model evaluated on
+    two-channel epochs would be a silent shape error at best, and at worst a
+    number that looked plausible."""
+    from sleepstatelab.config import Config, load
+
+    one = load("configs/one_channel.yaml")
+    assert one.data.channels == ("EEG Fpz-Cz",)
+    assert one.preprocessing_identity != Config().preprocessing_identity
+
+
+def test_a_one_channel_encoder_is_built_for_one_channel():
+    from sleepstatelab.config import load
+    from sleepstatelab.training.trainer import build_model, encoder_kwargs
+
+    config = load("configs/one_channel.yaml")
+    assert encoder_kwargs(config)["in_channels"] == 1
+    model = build_model(config)
+    assert model(torch.randn(2, 1, 3000)).shape == (2, 5)
+    with pytest.raises(ValueError, match="channel"):
+        model(torch.randn(2, 2, 3000))
+
+
+def test_channel_loss_and_one_channel_training_are_different_things():
+    """A model trained on one derivation has learned to work with what it has.
+    A two-channel model meeting a dead electrode has not. Reporting them as one
+    number would turn a robustness claim into a design claim."""
+    from sleepstatelab.config import Config, load
+    from sleepstatelab.training.trainer import build_model
+
+    trained_on_one = build_model(load("configs/one_channel.yaml"))
+    trained_on_two = build_model(Config())
+
+    # The one-channel model refuses two-channel input; the two-channel model
+    # refuses one-channel input. Neither can silently stand in for the other.
+    with pytest.raises(ValueError):
+        trained_on_one(torch.randn(1, 2, 3000))
+    with pytest.raises(ValueError):
+        trained_on_two(torch.randn(1, 1, 3000))
+
+    # Channel loss keeps the shape and zeroes the content, which is what an
+    # electrode failure looks like to a model that was never trained for it.
+    x = torch.randn(1, 2, 3000)
+    lost = x.clone()
+    lost[:, 1, :] = 0.0
+    assert trained_on_two(lost).shape == (1, 5)
+    assert not torch.allclose(trained_on_two(x), trained_on_two(lost))
