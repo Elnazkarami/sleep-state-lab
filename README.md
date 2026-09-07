@@ -106,10 +106,30 @@ absent accelerator raises rather than silently falling back — a benchmark that
 quietly ran for a week on the wrong hardware is worse than one that refused to
 start. CUDA and MPS are probed, never assumed.
 
-Every pilot result below was produced on CPU. The cohort runs use Apple MPS,
-which on this machine is **24× faster** for D1: 17 ms against 422 ms for a batch
-of 64. That is the difference between a nine-hour cohort pass sequence and a
-half-hour one, and it is why the cohort work is feasible on a laptop at all.
+Every pilot result below was produced on CPU. The cohort D1 run used Apple MPS,
+which on this machine was **24× faster** for D1: 17 ms against 422 ms for a batch
+of 64 — the difference between a nine-hour sequence of passes and a half-hour
+one.
+
+**Available is not the same as working, and `doctor` now says which.**
+Partway through the cohort work this machine's Metal shader compiler became
+unreachable. `torch.backends.mps.is_available()` went on returning `True`, and
+the next convolution killed the process with an assertion rather than an
+exception, taking a training run with it. So a device is now checked by *using*
+it — a small convolution and a backward pass, run in a subprocess, because a
+failure of that kind cannot be caught in the process it happens in:
+
+```
+$ sleepstatelab doctor --device auto
+cpu: available, and a test operation ran
+cuda: not available
+mps: available, but a test operation FAILED
+resolved device for --device auto: cpu
+```
+
+Asking for a broken device by name raises before any work starts. `auto` steps
+over it, since nothing was requested by name and so nothing is being silently
+substituted.
 
 The two devices agree: a checkpoint trained on MPS and then evaluated on both
 produced **identical predicted labels** on the held-out participant, with a

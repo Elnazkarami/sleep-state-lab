@@ -207,6 +207,9 @@ nine errors in them.
 | every shipped config file parses and implies 3,000 samples per epoch | `..::test_shipped_configs_parse` |
 | CPU is always available and selectable | `..::test_cpu_is_always_available` |
 | an absent accelerator raises rather than falling back | `..::test_an_absent_device_raises_rather_than_falling_back` |
+| a device is checked by running an operation on it | `..::test_a_device_can_be_checked_by_using_it` |
+| an available-but-unusable device reports itself as such | `..::test_an_unusable_device_reports_itself_as_such` |
+| a device failing its trial is refused by name, stepped over by `auto` | `..::test_resolve_refuses_a_device_that_fails_its_trial` |
 | the run record carries config hash, split, channels, revision | `..::test_provenance_records_the_contract` |
 
 ## The synthetic end-to-end run

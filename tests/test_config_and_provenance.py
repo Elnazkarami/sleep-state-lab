@@ -80,3 +80,45 @@ def test_provenance_records_the_contract():
     assert record.channels == ("EEG Fpz-Cz", "EEG Pz-Oz")
     assert record.split_id == "abc"
     assert record.code_revision
+
+
+def test_a_device_can_be_checked_by_using_it():
+    """CPU must pass a real operation, not merely claim to be available."""
+    from sleepstatelab.devices import device_works
+
+    assert device_works("cpu") is True
+
+
+def test_an_unusable_device_reports_itself_as_such():
+    """`torch.backends.mps.is_available()` returned True on a machine whose
+    Metal compiler had become unreachable, and the first convolution aborted the
+    process -- taking a cohort training run with it. Availability is a claim; a
+    test operation is evidence."""
+    from sleepstatelab.devices import probe
+
+    report = probe(check=True)
+    assert report.working["cpu"] is True
+    for name in ("cuda", "mps"):
+        if name in report.working:
+            assert isinstance(report.working[name], bool)
+    assert "test operation" in report.summary()
+
+
+def test_resolve_refuses_a_device_that_fails_its_trial(monkeypatch):
+    import sleepstatelab.devices as devices
+
+    broken = devices.DeviceReport(
+        torch_version="x",
+        cpu=True,
+        cuda=False,
+        cuda_devices=(),
+        mps=True,
+        mps_built=True,
+        working={"cpu": True, "mps": False},
+    )
+    monkeypatch.setattr(devices, "probe", lambda check=False: broken)
+    with pytest.raises(RuntimeError, match="test operation"):
+        devices.resolve("mps", check=True)
+    # `auto` steps over a broken accelerator rather than refusing outright:
+    # nothing was asked for by name, so nothing is being silently substituted.
+    assert devices.resolve("auto", check=True) == "cpu"

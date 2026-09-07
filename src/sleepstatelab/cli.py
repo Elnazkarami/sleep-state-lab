@@ -53,8 +53,11 @@ def _with_overrides(config: Config, args: argparse.Namespace) -> Config:
 def cmd_doctor(args: argparse.Namespace) -> int:
     """What this machine can run, and what is installed."""
     print(f"sleepstatelab {__version__}")
-    print(probe().summary())
-    print(f"resolved device for --device {args.device}: {resolve(args.device)}")
+    print(probe(check=not args.no_check).summary())
+    print(
+        f"resolved device for --device {args.device}: "
+        f"{resolve(args.device, check=not args.no_check)}"
+    )
     for name in ("numpy", "scipy", "sklearn", "torch", "mne", "matplotlib"):
         try:
             module = __import__(name)
@@ -302,7 +305,10 @@ def cmd_train_d1(args: argparse.Namespace) -> int:
     from sleepstatelab.training.trainer import train_d1
 
     config = _with_overrides(load(args.config), args)
-    device = resolve(config.train.device)
+    # Checked by use, not by claim: an accelerator that reports itself available
+    # and then aborts on its first kernel takes the whole run with it, and that
+    # has happened here.
+    device = resolve(config.train.device, check=True)
     split = Split.read(args.split)
 
     budget_participants = None
@@ -383,7 +389,10 @@ def cmd_train_d2(args: argparse.Namespace) -> int:
     from sleepstatelab.training.windows import build_window_datasets
 
     config = _with_overrides(load(args.config), args)
-    device = resolve(config.train.device)
+    # Checked by use, not by claim: an accelerator that reports itself available
+    # and then aborts on its first kernel takes the whole run with it, and that
+    # has happened here.
+    device = resolve(config.train.device, check=True)
     split = Split.read(args.split)
 
     budget_participants = None
@@ -495,7 +504,7 @@ def cmd_pretrain(args: argparse.Namespace) -> int:
     from sleepstatelab.training.pretrain import pretrain_encoder
 
     config = _with_overrides(load(args.config), args)
-    device = resolve(config.train.device)
+    device = resolve(config.train.device, check=True)
     split = Split.read(args.split)
 
     train, val, _, stats = build_datasets(config, split)
@@ -776,6 +785,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="what this machine can run")
     doctor.add_argument("--device", default="auto")
+    doctor.add_argument(
+        "--no-check",
+        action="store_true",
+        help="report what torch claims without running a test operation on it",
+    )
     doctor.set_defaults(func=cmd_doctor)
 
     audit = subparsers.add_parser("audit", help="discover recordings and write the manifest")
