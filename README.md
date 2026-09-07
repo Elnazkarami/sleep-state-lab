@@ -25,16 +25,23 @@ anywhere else in this document.
 | context-masking control | **implemented**, executed on real data |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
 | D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data; real-data run in progress |
+| full cohort discovered, audited, epoched, split | **done** — 153 recordings, 78 participants |
+| any model trained on the cohort | **not run** — every result below is the six-participant pilot |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
 | the other five required controls | **not run** |
 | transition and single-channel analyses | **not run** |
 
-**Executed on real data so far: a six-participant pilot** — four training, one
-validation, one test — on Sleep Cassette recordings downloaded from PhysioNet
-and verified against the published checksums. A test estimate from one held-out
-person is one person's night. It shows the pipeline runs end to end on real
-recordings and produces coherent numbers. It is not a benchmark and no
-generalisation claim is made from it.
+**The full cohort is now prepared.** All 153 Sleep Cassette recordings from 78
+participants, every file matching its published PhysioNet checksum, no recording
+with a problem: **414,961 stored epochs, 414,481 eligible** after quality
+control, of which 480 were rejected as clipped, 1,335 were unscored and 128 were
+movement time. Wake is 68.8% of the labelled epochs, N2 16.7%, REM 6.2%, N1
+5.2%, N3 3.1%. The cohort split is 47 training / 16 validation / 15 test
+participants (`outputs/split_cohort.json`, identity `2a0313adb97b9da0`).
+
+**Every model result below is still from the six-participant pilot** — four
+training, one validation, one test. A test estimate from one held-out person is
+one person's night. Nothing has yet been trained on the cohort.
 
 **D1 and D2 have been run at matched compute — on one held-out participant.**
 Sharing encodings between overlapping windows made a D2 pass cost the same as a
