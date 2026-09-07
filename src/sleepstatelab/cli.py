@@ -103,7 +103,9 @@ def cmd_prepare(args: argparse.Namespace) -> int:
 
     config = _with_overrides(load(args.config), args)
     started = time.time()
-    report = prepare(config, progress=True, force=args.force)
+    report = prepare(
+        config, progress=True, force=args.force, min_free_gb=args.min_free_gb
+    )
     print()
     print(report.summary())
     print(f"exclusions: {json.dumps(report.exclusions)}")
@@ -681,6 +683,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare = subparsers.add_parser("prepare", help="epoch every recording into the cache")
     common(prepare)
     prepare.add_argument("--force", action="store_true", help="re-epoch even if cached")
+    prepare.add_argument(
+        "--min-free-gb",
+        type=float,
+        default=1.0,
+        help="stop cleanly when the filesystem has less than this free (default 1 GB)",
+    )
     prepare.set_defaults(func=cmd_prepare)
 
     report_one = subparsers.add_parser(

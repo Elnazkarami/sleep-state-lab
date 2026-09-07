@@ -47,6 +47,16 @@ def reject_mask_flags(names: tuple[str, ...]) -> int:
     return flags
 
 
+def free_bytes(path: Path | str) -> int:
+    """Space left on the filesystem holding ``path``."""
+    import shutil
+
+    where = Path(path)
+    while not where.exists() and where != where.parent:
+        where = where.parent
+    return int(shutil.disk_usage(where).free)
+
+
 def cache_root(config: Config) -> Path:
     """Where this configuration's epochs live: one directory per preprocessing."""
     return Path(config.data.cache_dir) / config.preprocessing_identity
@@ -59,6 +69,14 @@ class PreparationReport:
     cache_dir: str
     preprocessing_id: str
     recordings: int
+    """How many were prepared. Equal to ``recordings_discovered`` unless the run
+    stopped early."""
+
+    recordings_discovered: int
+    stopped_early: str
+    """Empty when the run completed. Otherwise says why it did not, so a partial
+    cache cannot be mistaken for a whole one."""
+
     participants: int
     stored_epochs: int
     eligible_epochs: int
@@ -69,19 +87,39 @@ class PreparationReport:
     def summary(self) -> str:
         total = sum(self.counts_by_stage.values()) or 1
         share = "  ".join(f"{k} {v / total:.1%}" for k, v in self.counts_by_stage.items())
-        return (
-            f"{self.recordings} recording(s) from {self.participants} participant(s)\n"
+        lines = [
+            f"{self.recordings} of {self.recordings_discovered} recording(s) prepared, "
+            f"from {self.participants} participant(s)",
             f"{self.stored_epochs} stored epochs, {self.eligible_epochs} eligible "
-            f"after quality control\n{share}"
-        )
+            f"after quality control",
+            share,
+        ]
+        if self.stopped_early:
+            lines.append(f"INCOMPLETE: {self.stopped_early}")
+        return "\n".join(lines)
 
     def write(self, path: Path | str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(json.dumps(asdict(self), indent=2, default=str))
 
 
-def prepare(config: Config, *, progress: bool = False, force: bool = False) -> PreparationReport:
-    """Epoch every discovered recording into the cache, skipping what is there."""
+def prepare(
+    config: Config,
+    *,
+    progress: bool = False,
+    force: bool = False,
+    min_free_gb: float = 1.0,
+) -> PreparationReport:
+    """Epoch every discovered recording into the cache, skipping what is there.
+
+    ``min_free_gb`` stops the run cleanly when the filesystem is nearly full,
+    rather than letting the write that crosses the line produce a truncated
+    cache file. This is not hypothetical: a full disk during an earlier run left
+    a 157-byte EDF that still looked like a file, and a half-written cache entry
+    is worse, because nothing downstream checks it the way a published checksum
+    checks a download. Whatever was completed stays usable; the report says how
+    far it got.
+    """
     found = discover(
         config.data.root,
         participants=tuple(config.data.participants),
@@ -102,8 +140,20 @@ def prepare(config: Config, *, progress: bool = False, force: bool = False) -> P
     stored = 0
     eligible = 0
 
+    stopped_early = ""
     for index, pair in enumerate(found.pairs, start=1):
         path = target / f"{pair.recording_id}.npz"
+        available = free_bytes(target) / 1e9
+        if available < min_free_gb and not (path.exists() and not force):
+            stopped_early = (
+                f"stopped before {pair.recording_id}: {available:.2f} GB free, "
+                f"below the {min_free_gb:.2f} GB floor. "
+                f"{index - 1} of {len(found.pairs)} recording(s) were prepared and "
+                "are usable; free space and run prepare again to continue."
+            )
+            if progress:
+                print(f"\n{stopped_early}", flush=True)
+            break
         if path.exists() and not force:
             record = EpochedRecording.load(path)
             action = "cached"
@@ -138,11 +188,16 @@ def prepare(config: Config, *, progress: bool = False, force: bool = False) -> P
                 flush=True,
             )
 
+    prepared_participants = {
+        recording_id.split("-n")[0] for recording_id in per_recording
+    }
     report = PreparationReport(
         cache_dir=str(target),
         preprocessing_id=config.preprocessing_identity,
-        recordings=len(found.pairs),
-        participants=len(found.participants),
+        recordings=len(per_recording),
+        recordings_discovered=len(found.pairs),
+        stopped_early=stopped_early,
+        participants=len(prepared_participants),
         stored_epochs=stored,
         eligible_epochs=eligible,
         counts_by_stage=totals,

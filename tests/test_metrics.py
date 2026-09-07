@@ -91,3 +91,59 @@ def test_confusion_rows_are_truth():
     result = evaluate_rows(_rows("A", ["Wake", "Wake"], ["Wake", "N2"]))
     assert result.confusion[0][0] == 1
     assert result.confusion[0][2] == 1
+
+
+def test_duplicate_prediction_rows_are_refused(tmp_path):
+    """A file holding one epoch twice makes every metric from it wrong.
+
+    This happened for a dull reason: a run was interrupted after writing a block
+    of predictions, and the rerun appended a second copy. Support doubles, the
+    confusion matrix doubles, and nothing in the numbers looks unusual.
+    """
+    import csv
+
+    from sleepstatelab.evaluation.predictions import (
+        PREDICTION_COLUMNS,
+        find_duplicates,
+        read_predictions,
+    )
+
+    path = tmp_path / "predictions.csv"
+    row = [
+        "run", "m", "split", "test", 0, "SC400", "SC400-n1", 7, "Wake", "Wake",
+        "1.0", "0.0", "0.0", "0.0", "0.0", 0,
+    ]
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(PREDICTION_COLUMNS)
+        writer.writerow(row)
+        writer.writerow(row)
+
+    with pytest.raises(ValueError, match="duplicated prediction row"):
+        read_predictions(path)
+
+    rows = read_predictions(path, allow_duplicates=True)
+    assert len(rows) == 2
+    assert len(find_duplicates(rows)) == 1
+
+
+def test_distinct_models_at_the_same_epoch_are_not_duplicates(tmp_path):
+    """The same epoch under two models is exactly what a comparison looks like."""
+    import csv
+
+    from sleepstatelab.evaluation.predictions import PREDICTION_COLUMNS, read_predictions
+
+    path = tmp_path / "predictions.csv"
+    base = [
+        "run", "D2", "split", "test", 0, "SC400", "SC400-n1", 7, "Wake", "Wake",
+        "1.0", "0.0", "0.0", "0.0", "0.0", 0,
+    ]
+    other = list(base)
+    other[1] = "D2-shuffled-context"
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(PREDICTION_COLUMNS)
+        writer.writerow(base)
+        writer.writerow(other)
+
+    assert len(read_predictions(path)) == 2

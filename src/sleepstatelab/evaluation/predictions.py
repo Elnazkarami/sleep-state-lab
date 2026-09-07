@@ -145,8 +145,39 @@ class PredictionWriter:
         self.close()
 
 
-def read_predictions(path: Path | str) -> list[dict[str, Any]]:
-    """Read a prediction file back, with numbers as numbers."""
+def row_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    """What makes a prediction row unique: one model, one run, one epoch."""
+    return (
+        row["model"],
+        row["run_id"],
+        row["split_part"],
+        row["seed"],
+        row["recording_id"],
+        row["epoch_index"],
+    )
+
+
+def find_duplicates(rows: list[dict[str, Any]]) -> dict[tuple[Any, ...], int]:
+    """Keys appearing more than once, with their counts."""
+    counts: dict[tuple[Any, ...], int] = {}
+    for row in rows:
+        key = row_key(row)
+        counts[key] = counts.get(key, 0) + 1
+    return {key: n for key, n in counts.items() if n > 1}
+
+
+def read_predictions(
+    path: Path | str, *, allow_duplicates: bool = False
+) -> list[dict[str, Any]]:
+    """Read a prediction file back, with numbers as numbers.
+
+    Duplicate rows are an error rather than a curiosity. A file that holds the
+    same epoch twice under one model silently changes every metric computed from
+    it -- the support doubles, the confusion matrix doubles, and the macro-F1
+    shifts by however much the duplicated rows differ from the rest. It happens
+    for dull reasons: an interrupted run that appended a partial block, then a
+    second run that appended a whole one. So it is checked on the way in.
+    """
     rows: list[dict[str, Any]] = []
     with open(path, newline="") as handle:
         for raw in csv.DictReader(handle):
@@ -160,6 +191,18 @@ def read_predictions(path: Path | str) -> list[dict[str, Any]]:
             for name in STAGES:
                 row[f"p_{name}"] = float(raw[f"p_{name}"])
             rows.append(row)
+
+    if not allow_duplicates:
+        repeated = find_duplicates(rows)
+        if repeated:
+            example = next(iter(repeated))
+            models = sorted({key[0] for key in repeated})
+            raise ValueError(
+                f"{path} holds {len(repeated)} duplicated prediction row(s) for "
+                f"model(s) {models}, for example {example}. Every metric computed "
+                "from this file would be wrong. Regenerate the affected model's "
+                "predictions into a fresh file rather than appending again."
+            )
     return rows
 
 

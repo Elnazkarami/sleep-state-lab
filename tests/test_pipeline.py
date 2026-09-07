@@ -166,3 +166,24 @@ def test_prediction_uses_the_checkpoints_own_normalisation(prepared, tmp_path):
     _, _, test_refitted, refitted = build_datasets(config, split)
     assert refitted.identity != stats.identity, "the fixture must make the two differ"
     assert not np.allclose(test_with_stored.x, test_refitted.x)
+
+
+def test_prepare_stops_before_filling_the_disk(small_config, monkeypatch):
+    """A truncated cache entry is worse than a missing one: nothing downstream
+    checks it the way a published checksum checks a download."""
+    import sleepstatelab.data.prepare as prepare_module
+
+    monkeypatch.setattr(prepare_module, "free_bytes", lambda path: int(0.2e9))
+    report = prepare_module.prepare(small_config, progress=False, min_free_gb=1.0)
+
+    assert report.recordings == 0
+    assert report.recordings_discovered > 0
+    assert "below the" in report.stopped_early
+    assert "INCOMPLETE" in report.summary()
+
+
+def test_prepare_reports_completion_when_there_is_room(small_config):
+    report = prepare(small_config, progress=False, min_free_gb=0.0)
+    assert report.stopped_early == ""
+    assert report.recordings == report.recordings_discovered
+    assert "INCOMPLETE" not in report.summary()

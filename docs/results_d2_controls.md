@@ -1,6 +1,6 @@
-# D2 at compute matched to D1, with both context controls
+# D2 and D3 at compute matched to D1, with both context controls
 
-Generated from `predictions_matched.csv` (7707 saved prediction rows), split part `test`.
+Generated from `predictions_matched.csv` (17983 saved prediction rows), split part `test`.
 
 Primary metric: **macro-F1 computed per participant, then averaged equally across people**. Pooled macro-F1 is over all epochs at once and is given beside it, never instead of it.
 
@@ -10,15 +10,90 @@ Absent-class rule: Within a participant, a stage with no true and no predicted e
 
 | model | participant macro-F1 | pooled macro-F1 | balanced acc. | Cohen's kappa | accuracy | epochs | participants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| D3 | 0.675 ± 0.000 | 0.675 | 0.703 | 0.740 | 0.847 | 5138 | 1 |
+| D3-shuffled-context | 0.673 ± 0.000 | 0.673 | 0.701 | 0.738 | 0.846 | 2569 | 1 |
+| D3-context-masked | 0.593 ± 0.000 | 0.593 | 0.669 | 0.707 | 0.830 | 2569 | 1 |
 | D2 | 0.576 ± 0.000 | 0.576 | 0.631 | 0.614 | 0.767 | 2569 | 1 |
 | D2-shuffled-context | 0.571 ± 0.000 | 0.571 | 0.625 | 0.612 | 0.765 | 2569 | 1 |
 | D2-context-masked | 0.481 ± 0.000 | 0.481 | 0.622 | 0.594 | 0.760 | 2569 | 1 |
 
 ## Per participant (primary metric)
 
-| participant | D2 | D2-context-masked | D2-shuffled-context |
-| --- | ---: | ---: | ---: |
-| SC404 | 0.576 | 0.481 | 0.571 |
+| participant | D2 | D2-context-masked | D2-shuffled-context | D3 | D3-context-masked | D3-shuffled-context |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SC404 | 0.576 | 0.481 | 0.571 | 0.675 | 0.593 | 0.673 |
+
+## D3
+
+Run `pilot6-d3`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.000 (0 flagged epochs of 5138).
+
+### Per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.987 | 0.963 | 0.975 | 0.975 | 3068 | 1 |
+| N1 | 0.339 | 0.494 | 0.402 | 0.402 | 332 | 1 |
+| N2 | 0.910 | 0.766 | 0.832 | 0.832 | 1240 | 1 |
+| N3 | 0.656 | 0.792 | 0.718 | 0.718 | 106 | 1 |
+| REM | 0.403 | 0.500 | 0.446 | 0.446 | 392 | 1 |
+
+### Confusion matrix
+
+| true \ predicted | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wake | 2956 | 72 | 6 | 0 | 34 |
+| N1 | 40 | 164 | 20 | 0 | 108 |
+| N2 | 0 | 98 | 950 | 44 | 148 |
+| N3 | 0 | 0 | 22 | 84 | 0 |
+| REM | 0 | 150 | 46 | 0 | 196 |
+
+## D3-shuffled-context
+
+Run `pilot6-d3`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.000 (0 flagged epochs of 2569).
+
+### Per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.986 | 0.963 | 0.975 | 0.975 | 1534 | 1 |
+| N1 | 0.331 | 0.482 | 0.392 | 0.392 | 166 | 1 |
+| N2 | 0.906 | 0.766 | 0.830 | 0.830 | 620 | 1 |
+| N3 | 0.656 | 0.792 | 0.718 | 0.718 | 53 | 1 |
+| REM | 0.408 | 0.500 | 0.450 | 0.450 | 196 | 1 |
+
+### Confusion matrix
+
+| true \ predicted | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wake | 1478 | 37 | 3 | 0 | 16 |
+| N1 | 21 | 80 | 11 | 0 | 54 |
+| N2 | 0 | 51 | 475 | 22 | 72 |
+| N3 | 0 | 0 | 11 | 42 | 0 |
+| REM | 0 | 74 | 24 | 0 | 98 |
+
+## D3-context-masked
+
+Run `pilot6-d3`, split `4b13bdea21d4fdad`, seed 0. Quality-control coverage 1.000 (0 flagged epochs of 2569).
+
+### Per stage
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.969 | 0.972 | 0.970 | 0.970 | 1534 | 1 |
+| N1 | 0.333 | 0.036 | 0.065 | 0.065 | 166 | 1 |
+| N2 | 0.857 | 0.724 | 0.785 | 0.785 | 620 | 1 |
+| N3 | 0.539 | 0.906 | 0.676 | 0.676 | 53 | 1 |
+| REM | 0.348 | 0.709 | 0.467 | 0.467 | 196 | 1 |
+
+### Confusion matrix
+
+| true \ predicted | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Wake | 1491 | 7 | 8 | 1 | 27 |
+| N1 | 36 | 6 | 21 | 0 | 103 |
+| N2 | 1 | 1 | 449 | 40 | 129 |
+| N3 | 0 | 0 | 4 | 48 | 1 |
+| REM | 11 | 4 | 42 | 0 | 139 |
 
 ## D2
 
