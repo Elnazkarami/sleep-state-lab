@@ -16,6 +16,7 @@ neighbour from the epoch on the other side of a gap.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -27,6 +28,7 @@ from sleepstatelab.data.prepare import load_cached, reject_mask_flags
 from sleepstatelab.data.preprocess import NormalizationStats, bandpass, fit_normalization
 from sleepstatelab.data.splits import Split
 from sleepstatelab.labels import STAGES
+from sleepstatelab.training.store import materialise, store_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,12 +75,16 @@ class EpochDataset(Dataset):
         config: Config,
         stats: NormalizationStats,
         reject_flags: int,
+        store_dir: Path | str | None = None,
+        progress: bool = False,
     ) -> None:
         self.config = config
         self.stats = stats
         blocks: list[np.ndarray] = []
         labels: list[np.ndarray] = []
         entries: list[EpochIndexEntry] = []
+        self.lengths: list[int] = []
+        self.recording_ids: list[str] = []
         for record in recordings:
             keep = record.eligible(reject_flags)
             if not keep.any():
@@ -86,6 +92,8 @@ class EpochDataset(Dataset):
             signals = record.signals[keep]
             signals = bandpass(signals, record.sampling_rate_hz, config.preprocess)
             blocks.append(stats.apply(signals))
+            self.lengths.append(int(blocks[-1].shape[0]))
+            self.recording_ids.append(record.recording_id)
             labels.append(record.labels[keep].astype(np.int64))
             entries.extend(
                 EpochIndexEntry(
@@ -100,15 +108,38 @@ class EpochDataset(Dataset):
             )
         if not blocks:
             raise ValueError("no eligible epochs in these recordings")
-        self.x = np.concatenate(blocks, axis=0)
         self.y = np.concatenate(labels, axis=0)
         self.entries = entries
+
+        if store_dir is None:
+            self.x = np.concatenate(blocks, axis=0)
+        else:
+            # Written once and memory-mapped thereafter. The cohort's training
+            # epochs are about 6 GB; holding them, the validation set and the
+            # test set in memory at once is what a 16 GB machine cannot do.
+            self.x = materialise(
+                blocks,
+                directory=store_dir,
+                key=store_key(
+                    preprocessing_id=config.preprocessing_identity,
+                    normalization_id=stats.identity,
+                    recordings=self.recording_ids,
+                    reject_flags=reject_flags,
+                    n_epochs=int(self.y.size),
+                ),
+                progress=progress,
+            )
 
     def __len__(self) -> int:
         return int(self.x.shape[0])
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
-        return torch.from_numpy(self.x[index]), int(self.y[index])
+        # np.array, not asarray: a writable copy of the single epoch. The
+        # memmap is read-only, and torch warns -- correctly -- that it cannot
+        # guarantee anything about a tensor sharing non-writable memory. Copying
+        # one epoch is also what makes the page cache, rather than this process,
+        # the thing that decides what stays resident.
+        return torch.from_numpy(np.array(self.x[index])), int(self.y[index])
 
     @property
     def participants(self) -> tuple[str, ...]:
@@ -130,6 +161,8 @@ def build_datasets(
     *,
     train_participants: tuple[str, ...] | None = None,
     stats: NormalizationStats | None = None,
+    store: bool | None = None,
+    progress: bool = False,
 ) -> tuple[EpochDataset, EpochDataset, EpochDataset, NormalizationStats]:
     """Train, validation and test datasets, with statistics fitted on training only.
 
@@ -186,7 +219,31 @@ def build_datasets(
             f"the configuration asks for {tuple(config.data.channels)}"
         )
 
-    train = EpochDataset(train_records, config=config, stats=stats, reject_flags=reject)
+    # Materialise to disk when the cohort is large enough that holding train,
+    # validation and test in memory at once is the thing that fails. The
+    # threshold is a size, not a participant count, because a cohort of long
+    # recordings is the same problem as a cohort of many.
+    total_epochs = sum(
+        int(record.eligible(reject).sum())
+        for record in (*train_records, *val_records, *test_records)
+    )
+    bytes_needed = total_epochs * len(config.data.channels) * config.samples_per_epoch * 4
+    use_store = store if store is not None else bytes_needed > 2e9
+    store_dir = Path(config.data.cache_dir) / "materialised" if use_store else None
+    if use_store and progress:
+        print(
+            f"materialising epochs to disk: {bytes_needed / 1e9:.1f} GB across "
+            f"train, validation and test"
+        )
+
+    train = EpochDataset(
+        train_records,
+        config=config,
+        stats=stats,
+        reject_flags=reject,
+        store_dir=store_dir,
+        progress=progress,
+    )
     if not val_records:
         # Falling back to the training set would make early stopping select on
         # data the model is fitting, which is not a validation score at all.
@@ -194,6 +251,20 @@ def build_datasets(
             f"split {split.name!r} has no validation participants with eligible "
             "epochs; checkpoint selection would have nothing to select on"
         )
-    val = EpochDataset(val_records, config=config, stats=stats, reject_flags=reject)
-    test = EpochDataset(test_records, config=config, stats=stats, reject_flags=reject)
+    val = EpochDataset(
+        val_records,
+        config=config,
+        stats=stats,
+        reject_flags=reject,
+        store_dir=store_dir,
+        progress=progress,
+    )
+    test = EpochDataset(
+        test_records,
+        config=config,
+        stats=stats,
+        reject_flags=reject,
+        store_dir=store_dir,
+        progress=progress,
+    )
     return train, val, test, stats

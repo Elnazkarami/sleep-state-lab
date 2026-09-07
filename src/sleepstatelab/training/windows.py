@@ -26,6 +26,7 @@ treats a zero epoch as a measurement.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -39,6 +40,7 @@ from sleepstatelab.data.preprocess import NormalizationStats, bandpass, fit_norm
 from sleepstatelab.data.splits import Split
 from sleepstatelab.labels import STAGES
 from sleepstatelab.training.dataset import EpochIndexEntry, class_weights_from_counts
+from sleepstatelab.training.store import block_views, materialise, store_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +103,8 @@ class ContextWindowDataset(Dataset):
         stats: NormalizationStats,
         reject_flags: int,
         context: int = 11,
+        store_dir: Path | str | None = None,
+        progress: bool = False,
     ) -> None:
         self.config = config
         self.stats = stats
@@ -110,6 +114,8 @@ class ContextWindowDataset(Dataset):
         self.rows: list[np.ndarray] = []
         self.masks: list[np.ndarray] = []
         self.entries: list[EpochIndexEntry] = []
+        lengths: list[int] = []
+        ids: list[str] = []
         self.index: list[tuple[int, int]] = []
         """One entry per window: which recording, and which row is its centre."""
 
@@ -125,6 +131,8 @@ class ContextWindowDataset(Dataset):
 
             recording_id = len(self.blocks)
             self.blocks.append(block)
+            lengths.append(int(block.shape[0]))
+            ids.append(record.recording_id)
             self.labels.append(record.labels[keep].astype(np.int64))
             self.rows.append(rows)
             self.masks.append(mask)
@@ -141,6 +149,24 @@ class ContextWindowDataset(Dataset):
         if not self.index:
             raise ValueError("no eligible epochs in these recordings")
 
+        if store_dir is not None:
+            # One array on disk, split back into per-recording views. A slice of
+            # a memmap is a memmap, so indexing a window still touches only the
+            # pages it needs.
+            materialised = materialise(
+                self.blocks,
+                directory=store_dir,
+                key=store_key(
+                    preprocessing_id=config.preprocessing_identity,
+                    normalization_id=stats.identity,
+                    recordings=ids,
+                    reject_flags=reject_flags,
+                    n_epochs=int(sum(lengths)),
+                ),
+                progress=progress,
+            )
+            self.blocks = block_views(materialised, lengths)
+
         # Ordered by recording and then by row, which is exactly the order of
         # ``self.index``: a window's label is ``self.y[i]``.
         self.y = np.concatenate(self.labels)
@@ -156,7 +182,7 @@ class ContextWindowDataset(Dataset):
 
         window = np.zeros((self.context, *block.shape[1:]), dtype=np.float32)
         present = rows >= 0
-        window[present] = block[rows[present]]
+        window[present] = np.asarray(block[rows[present]])
         return (
             torch.from_numpy(window),
             torch.from_numpy(mask.copy()),
@@ -198,6 +224,8 @@ def build_window_datasets(
     stats: NormalizationStats | None = None,
     segments: bool = False,
     centres_per_segment: int = 32,
+    store: bool | None = None,
+    progress: bool = False,
 ) -> tuple[Any, Any, Any, NormalizationStats]:
     """Train, validation and test window datasets, fitted on training only.
 
@@ -248,6 +276,14 @@ def build_window_datasets(
             seed=config.split.seed,
         )
 
+    total_epochs = sum(
+        int(record.eligible(reject).sum())
+        for record in (*train_records, *val_records, *test_records)
+    )
+    bytes_needed = total_epochs * len(config.data.channels) * config.samples_per_epoch * 4
+    use_store = store if store is not None else bytes_needed > 2e9
+    store_dir = Path(config.data.cache_dir) / "materialised" if use_store else None
+
     def build(records: list[EpochedRecording]) -> Any:
         if segments:
             return SegmentDataset(
@@ -257,6 +293,8 @@ def build_window_datasets(
                 reject_flags=reject,
                 context=context,
                 centres=centres_per_segment,
+                store_dir=store_dir,
+                progress=progress,
             )
         return ContextWindowDataset(
             records,
@@ -264,6 +302,8 @@ def build_window_datasets(
             stats=stats,
             reject_flags=reject,
             context=context,
+            store_dir=store_dir,
+            progress=progress,
         )
 
     return build(train_records), build(val_records), build(test_records), stats
@@ -363,6 +403,8 @@ class SegmentDataset(Dataset):
         reject_flags: int,
         context: int = 11,
         centres: int = 32,
+        store_dir: Path | str | None = None,
+        progress: bool = False,
     ) -> None:
         self.windows = ContextWindowDataset(
             recordings,
@@ -370,6 +412,8 @@ class SegmentDataset(Dataset):
             stats=stats,
             reject_flags=reject_flags,
             context=context,
+            store_dir=store_dir,
+            progress=progress,
         )
         self.context = context
         self.centres = centres

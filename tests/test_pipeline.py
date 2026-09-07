@@ -238,3 +238,75 @@ def test_load_cached_honours_the_configured_participants(small_config, tmp_path)
         config, data=dataclasses.replace(config.data, participants=("SC400", "SC402"))
     )
     assert sorted(r.participant_id for r in load_cached(two)) == ["SC400", "SC402"]
+
+
+def test_materialised_and_in_memory_datasets_agree(small_config, tmp_path):
+    """The memory-mapped store must be an implementation detail, not a change.
+
+    It exists because the cohort's epochs do not fit in RAM beside the model;
+    if it altered a single value, every result before and after it would be
+    incomparable.
+    """
+    import numpy as np
+
+    from sleepstatelab.data.prepare import load_cached, prepare, reject_mask_flags
+    from sleepstatelab.data.preprocess import bandpass, fit_normalization
+    from sleepstatelab.training.dataset import EpochDataset
+
+    prepare(small_config, progress=False)
+    records = load_cached(small_config)
+    reject = reject_mask_flags(tuple(small_config.preprocess.qc_reject))
+    stats = fit_normalization(
+        [
+            bandpass(r.signals[r.eligible(reject)], r.sampling_rate_hz, small_config.preprocess)
+            for r in records
+        ],
+        [r.participant_id for r in records],
+        channels=tuple(small_config.data.channels),
+        config=small_config.preprocess,
+    )
+
+    in_memory = EpochDataset(
+        records, config=small_config, stats=stats, reject_flags=reject
+    )
+    mapped = EpochDataset(
+        records,
+        config=small_config,
+        stats=stats,
+        reject_flags=reject,
+        store_dir=tmp_path / "store",
+    )
+    assert np.array_equal(in_memory.y, mapped.y)
+    assert np.allclose(np.asarray(in_memory.x), np.asarray(mapped.x))
+    assert mapped.x.shape == in_memory.x.shape
+
+    first_x, first_y = in_memory[3]
+    second_x, second_y = mapped[3]
+    assert first_y == second_y
+    assert np.allclose(first_x.numpy(), second_x.numpy())
+
+
+def test_the_store_is_reused_rather_than_rewritten(small_config, tmp_path):
+    """The second model trained on a split must start immediately."""
+    from sleepstatelab.data.prepare import load_cached, prepare, reject_mask_flags
+    from sleepstatelab.data.preprocess import fit_normalization
+    from sleepstatelab.training.dataset import EpochDataset
+
+    prepare(small_config, progress=False)
+    records = load_cached(small_config)
+    reject = reject_mask_flags(tuple(small_config.preprocess.qc_reject))
+    stats = fit_normalization(
+        [r.signals[r.eligible(reject)] for r in records],
+        [r.participant_id for r in records],
+        channels=tuple(small_config.data.channels),
+        config=small_config.preprocess,
+    )
+    store = tmp_path / "store"
+    EpochDataset(records, config=small_config, stats=stats, reject_flags=reject, store_dir=store)
+    written = sorted(store.glob("epochs-*.npy"))
+    assert len(written) == 1
+    stamp = written[0].stat().st_mtime_ns
+
+    EpochDataset(records, config=small_config, stats=stats, reject_flags=reject, store_dir=store)
+    assert sorted(store.glob("epochs-*.npy")) == written
+    assert written[0].stat().st_mtime_ns == stamp

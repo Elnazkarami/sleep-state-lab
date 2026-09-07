@@ -26,7 +26,8 @@ anywhere else in this document.
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
 | D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data; real-data run in progress |
 | full cohort discovered, audited, epoched, split | **done** — 153 recordings, 78 participants |
-| any model trained on the cohort | **not run** — every result below is the six-participant pilot |
+| D1 trained and scored on the cohort | **done** — 15 held-out participants |
+| D2, D3 on the cohort | **not run** |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
 | the other five required controls | **not run** |
 | transition and single-channel analyses | **not run** |
@@ -39,9 +40,11 @@ movement time. Wake is 68.8% of the labelled epochs, N2 16.7%, REM 6.2%, N1
 5.2%, N3 3.1%. The cohort split is 47 training / 16 validation / 15 test
 participants (`outputs/split_cohort.json`, identity `2a0313adb97b9da0`).
 
-**Every model result below is still from the six-participant pilot** — four
-training, one validation, one test. A test estimate from one held-out person is
-one person's night. Nothing has yet been trained on the cohort.
+**D1 has been trained and scored on the cohort**: 47 training, 16 validation,
+15 held-out participants, 81,355 test epochs. D2 and D3 have not — their results
+below are still the six-participant pilot, where the test estimate is one
+person's night. The pilot section says so at every table, and one of its
+findings has already been overturned by the cohort.
 
 **D1 and D2 have been run at matched compute — on one held-out participant.**
 Sharing encodings between overlapping windows made a D2 pass cost the same as a
@@ -101,8 +104,19 @@ mps: available
 **CPU is always selectable** with `--device cpu`, and a run that asks for an
 absent accelerator raises rather than silently falling back — a benchmark that
 quietly ran for a week on the wrong hardware is worse than one that refused to
-start. CUDA and MPS are probed, never assumed. Everything below was executed on
-CPU.
+start. CUDA and MPS are probed, never assumed.
+
+Every pilot result below was produced on CPU. The cohort runs use Apple MPS,
+which on this machine is **24× faster** for D1: 17 ms against 422 ms for a batch
+of 64. That is the difference between a nine-hour cohort pass sequence and a
+half-hour one, and it is why the cohort work is feasible on a laptop at all.
+
+The two devices agree: a checkpoint trained on MPS and then evaluated on both
+produced **identical predicted labels** on the held-out participant, with a
+maximum probability difference of 7.75e-07. A result is therefore not a property
+of which device produced it — but the device is recorded in every checkpoint and
+run record anyway, because that is the sort of thing one wants to be able to
+check rather than assume.
 
 ## Get the data
 
@@ -431,6 +445,61 @@ per-participant spread. Full protocol in
 
 ## Results
 
+### The cohort: 78 participants, 15 held out
+
+The first result on the whole of Sleep Cassette. D1 trained on 47 participants
+(249,041 epochs), selected on 16 validation participants, scored on 15 who were
+never seen: **81,355 test epochs**.
+
+Trained on Apple MPS, 19 passes at 227–290 s, best validation participant
+macro-F1 0.7090 at pass 13, stopped after six without improvement.
+
+| model | participant macro-F1 | pooled macro-F1 | balanced acc. | Cohen's kappa | accuracy | epochs | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| D1 | 0.673 ± 0.097 | 0.715 | 0.757 | 0.750 | 0.874 | 81355 | 15 |
+| D1+smoothing | 0.655 ± 0.104 | 0.700 | 0.772 | 0.710 | 0.851 | 81355 | 15 |
+
+Per-stage, D1:
+
+| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Wake | 0.995 | 0.948 | 0.971 | 0.969 | 56983 | 15 |
+| N1 | 0.271 | 0.620 | 0.377 | 0.378 | 3556 | 15 |
+| N2 | 0.865 | 0.690 | 0.768 | 0.758 | 12477 | 15 |
+| N3 | 0.703 | 0.803 | 0.749 | 0.553 | 2892 | 15 |
+| REM | 0.694 | 0.726 | 0.710 | 0.707 | 5447 | 15 |
+
+Three things are worth reading off this that six participants could not show.
+
+**The spread is the result.** Participant macro-F1 runs from 0.524 to 0.831
+across the fifteen. A cohort mean of 0.673 describes nobody in particular, which
+is why the per-participant table is in the generated report and why the primary
+metric averages people rather than epochs.
+
+**Pooled and participant-averaged diverge, and N3 is where.** N3's pooled F1 is
+0.749 but its participant mean is 0.553 — the pooled figure is carried by the
+participants who had plenty of N3, and the mean counts the ones who had almost
+none, where a handful of epochs decide the score. Both numbers are correct and
+they answer different questions; the README reports both for exactly this
+reason.
+
+**N1 remains the hard stage**: 0.271 precision at 0.620 recall. Every automatic
+scorer struggles with it, it is 4.4% of the test epochs, and a single-epoch
+model with no EOG has less to go on than a human scorer does.
+
+#### The pilot's smoothing result did not survive the cohort
+
+On the pilot, D1 plus a training-fitted transition table beat plain D1 —
+0.719 against 0.702 — and I wrote at the time that whether it held was unknown.
+It did not. On 15 held-out participants smoothing **loses**: 0.655 against
+0.673, helping five participants and hurting ten.
+
+That is the pilot caveat doing its job. One held-out participant produced a
+clean, plausible, quotable ordering of five models, and the ordering was an
+artefact of that participant. The transition table is still the right control to
+run — a temporal model that cannot beat it is not earning its parameters — but
+on this cohort it is not a bar D1 needs help clearing.
+
 ### The six-participant pilot, on real recordings
 
 Six Sleep Cassette participants, one night each, downloaded from PhysioNet and
@@ -550,9 +619,10 @@ That is the outcome this control exists to be able to report, and it is a
 standing challenge to every temporal result that follows: a context model has to
 beat D1-plus-smoothing, not merely D1.
 
-Whether it holds is unknown. This is one held-out participant, and the ordering
-of five models that span 0.14 macro-F1 on one person's night is not something to
-carry forward as a finding. What it does establish is that the comparison is now
+**It did not hold.** On the cohort's fifteen held-out participants smoothing
+loses to plain D1, 0.655 against 0.673. This is one held-out participant, and
+the ordering of five models spanning 0.14 macro-F1 on one person's night was an
+artefact of that person. What it does establish is that the comparison is now
 *possible* — the control is implemented, runs from saved predictions, and will
 be part of the benchmark rather than an afterthought once someone asks why a
 transformer was needed.
