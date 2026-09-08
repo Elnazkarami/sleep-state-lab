@@ -32,7 +32,7 @@ anywhere else in this document.
 | D1 trained and scored on the cohort | **done** — 15 held-out participants |
 | D2, D3 on the cohort | **running** |
 | the 10% / 25% / 100% label-budget benchmark | **harness implemented**, not run |
-| transition analysis | **not implemented** |
+| transition analysis | **implemented**, run on the cohort |
 
 **The full cohort is now prepared.** All 153 Sleep Cassette recordings from 78
 participants, every file matching its published PhysioNet checksum, no recording
@@ -508,6 +508,61 @@ reason.
 **N1 remains the hard stage**: 0.271 precision at 0.620 recall. Every automatic
 scorer struggles with it, it is 4.4% of the test epochs, and a single-epoch
 model with no EOG has less to go on than a human scorer does.
+
+#### Where the errors are: performance by distance from a stage change
+
+Stage boundaries are where scoring is hard, for people as well as models. The
+`transitions` command groups saved predictions by how far each epoch is from a
+scored stage change and scores each band separately. Annotations are read **only
+to decide which epochs to report together** — distance never entered training,
+sampling, class weighting or model selection.
+
+Cohort D1, 15 held-out participants:
+
+| distance from a stage change | epochs | share | participant macro-F1 | accuracy | participants |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| at a change | 6448 | 7.9% | 0.490 ± 0.084 | 0.545 | 15 |
+| 1 epoch away | 3457 | 4.2% | 0.560 ± 0.109 | 0.617 | 15 |
+| 2 epochs away | 2530 | 3.1% | 0.602 ± 0.110 | 0.661 | 15 |
+| 3-5 epochs away | 5134 | 6.3% | 0.610 ± 0.128 | 0.713 | 15 |
+| 6+ epochs away | 61592 | 75.7% | 0.652 ± 0.113 | 0.944 | 15 |
+| no change in the run | 2194 | 2.7% | 0.232 ± 0.048 | 0.898 | 5 |
+
+Accuracy falls from 94.4% six or more epochs from a boundary to **54.5% at
+one**, and the 7.9% of epochs that flank a change carry a wildly
+disproportionate share of the errors. The "no change in the run" band is small
+and odd-looking — high accuracy, low macro-F1 — because a run with no stage
+change at all is usually a long stretch of wake, where only one or two classes
+are present and macro-F1 over five has little to average.
+
+**This is a fact about the classifier, not about sleep.** It says where the
+errors are concentrated. It says nothing about attractors, bifurcations, or
+neural dynamics, and this repository will not use it to.
+
+#### Why the smoothing control lost: it smooths away real changes
+
+Running the same analysis on D1 plus the transition table shows exactly where it
+went wrong:
+
+| distance from a stage change | epochs | share | participant macro-F1 | accuracy | participants |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| at a change | 6448 | 7.9% | 0.416 ± 0.073 | 0.478 | 15 |
+| 1 epoch away | 3457 | 4.2% | 0.515 ± 0.105 | 0.565 | 15 |
+| 2 epochs away | 2530 | 3.1% | 0.539 ± 0.111 | 0.595 | 15 |
+| 3-5 epochs away | 5134 | 6.3% | 0.567 ± 0.131 | 0.650 | 15 |
+| 6+ epochs away | 61592 | 75.7% | 0.655 ± 0.132 | 0.932 | 15 |
+| no change in the run | 2194 | 2.7% | 0.350 ± 0.111 | 0.908 | 5 |
+
+Smoothing improves the far-from-a-boundary band slightly (0.655 against 0.652)
+and **damages every band near one** — 0.416 against 0.490 at a change, with
+accuracy falling from 0.545 to 0.478. A transition table fitted on real sleep is
+dominated by persistence: P(stay) is 0.993 for wake and above 0.84 for every
+stage. Decoding through it therefore prefers to keep the stage it is in, which is
+right for the 76% of epochs far from a boundary and wrong for the ones that
+matter most.
+
+That is a satisfying answer to a question the aggregate number could not have
+answered, and it is the reason the transition analysis exists.
 
 #### The pilot's smoothing result did not survive the cohort
 

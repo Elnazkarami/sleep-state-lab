@@ -138,6 +138,30 @@ The smoke run additionally asserts, on generated recordings, that the encoder sa
 only training participants and that its checkpoint round-trips into a usable
 backbone with the held-out participants refused.
 
+## Distance from a stage change
+
+| what is asserted | test |
+| --- | --- |
+| both epochs flanking a change are at distance zero | `test_transitions.py::test_both_epochs_flanking_a_change_are_at_it` |
+| distance is to the nearest change | `test_transitions.py::test_distance_is_to_the_nearest_change` |
+| **a gap is not a transition** | `test_transitions.py::test_a_gap_is_not_a_transition` |
+| a run with no change is named, not called far | `test_transitions.py::test_a_run_with_no_change_is_named_rather_than_called_far` |
+| changes are found independently within each run | `test_transitions.py::test_changes_within_each_run_are_found_independently` |
+| the bands partition the epochs | `test_transitions.py::test_bands_partition_the_epochs` |
+| errors concentrated at a boundary show up in that band | `test_transitions.py::test_errors_concentrated_at_a_boundary_show_up_there` |
+
+## The label-budget benchmark plan
+
+| what is asserted | test |
+| --- | --- |
+| the plan covers every model, budget and seed | `test_benchmark.py::test_the_plan_covers_every_model_budget_and_seed` |
+| **budgets are nested** | `test_benchmark.py::test_budgets_are_nested` |
+| a budget never reaches validation or test participants | `test_benchmark.py::test_a_budget_never_reaches_validation_or_test` |
+| the validation disclosure is always present | `test_benchmark.py::test_the_validation_disclosure_is_always_present` |
+| the primary comparison is declared, not chosen | `test_benchmark.py::test_the_primary_comparison_is_declared_not_chosen` |
+| the difference reports the across-seed spread | `test_benchmark.py::test_the_difference_reports_the_spread_across_seeds` |
+| an unrun budget says so rather than returning a number | `test_benchmark.py::test_an_unrun_budget_says_so_rather_than_returning_a_number` |
+
 ## The command line exists and dispatches
 
 | what is asserted | test |

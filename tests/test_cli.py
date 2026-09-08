@@ -32,6 +32,7 @@ EXPECTED = {
     "predict",
     "smooth",
     "benchmark",
+    "transitions",
     "report",
     "smoke",
 }

@@ -884,6 +884,56 @@ def checkpoint_model(checkpoint: Any, config: Config, device: str) -> Any:
     return model.to(device)
 
 
+def cmd_transitions(args: argparse.Namespace) -> int:
+    """Score saved predictions by distance from a scored stage change."""
+    from collections import defaultdict
+
+    from sleepstatelab.evaluation.predictions import read_predictions
+    from sleepstatelab.evaluation.transitions import by_distance, table
+
+    rows = read_predictions(args.predictions)
+    rows = [r for r in rows if r["split_part"] == args.part]
+    if args.models:
+        rows = [r for r in rows if r["model"] in set(args.models)]
+    if not rows:
+        raise SystemExit(f"{args.predictions} holds no rows for part {args.part!r}")
+
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[row["model"]].append(row)
+
+    sections = [
+        "# Performance by distance from a stage change",
+        "",
+        f"Generated from `{Path(args.predictions).name}`, split part `{args.part}`.",
+        "",
+        "Annotations are read here **only to decide which epochs to report "
+        "separately**. Distance from a transition never entered training, "
+        "sampling, class weighting or model selection; these are the same saved "
+        "predictions every other table is built from, grouped after the fact.",
+        "",
+        "A stage change is a change between two epochs whose original indices "
+        "differ by exactly one. Two epochs either side of an excluded epoch are "
+        "not a transition -- nothing is known about what happened between them.",
+        "",
+        "**What this cannot show:** that stages are attractors, that transitions "
+        "are bifurcations, or anything about neural dynamics. It shows where a "
+        "classifier's errors are concentrated, which is a fact about the "
+        "classifier.",
+        "",
+    ]
+    for model in sorted(grouped):
+        results = by_distance(grouped[model])
+        sections += [f"## {model}", "", table(results), ""]
+        print(f"\n{model}")
+        print(table(results))
+
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.output).write_text("\n".join(sections))
+    print(f"\nwritten to {args.output}")
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     """Build the report tables from saved predictions."""
     from sleepstatelab.evaluation.metrics import evaluate_predictions
@@ -1123,6 +1173,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the plan and the participants each budget uses, and stop",
     )
     bench.set_defaults(func=cmd_benchmark)
+
+    trans = subparsers.add_parser(
+        "transitions",
+        help="score saved predictions by distance from a scored stage change",
+    )
+    trans.add_argument("predictions")
+    trans.add_argument("--part", default="test", choices=("train", "val", "test"))
+    trans.add_argument("--models", nargs="*", help="limit to these saved models")
+    trans.add_argument("--output", default="outputs/transitions.md")
+    trans.set_defaults(func=cmd_transitions)
 
     report = subparsers.add_parser("report", help="build tables from saved predictions")
     report.add_argument("predictions")
