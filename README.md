@@ -31,7 +31,7 @@ anywhere else in this document.
 | full cohort discovered, audited, epoched, split | **done** — 153 recordings, 78 participants |
 | D1 trained and scored on the cohort | **done** — 15 held-out participants |
 | D2, D3 on the cohort | **running** |
-| the 10% / 25% / 100% label-budget benchmark | **not run** |
+| the 10% / 25% / 100% label-budget benchmark | **harness implemented**, not run |
 | transition analysis | **not implemented** |
 
 **The full cohort is now prepared.** All 153 Sleep Cassette recordings from 78

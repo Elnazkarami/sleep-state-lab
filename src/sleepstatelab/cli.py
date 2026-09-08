@@ -766,6 +766,124 @@ def cmd_smooth(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """Run the label-budget benchmark, or print the plan without running it."""
+    import dataclasses
+
+    from sleepstatelab.benchmark import PRIMARY_BUDGET, build_plan
+    from sleepstatelab.data.splits import Split
+    from sleepstatelab.evaluation.predictions import PredictionWriter, read_predictions
+    from sleepstatelab.training.checkpoint import load_encoder_checkpoint
+    from sleepstatelab.training.trainer import predict, train_d2
+    from sleepstatelab.training.windows import build_window_datasets
+
+    config = _with_overrides(load(args.config), args)
+    split = Split.read(args.split)
+    plan = build_plan(
+        split,
+        budgets=tuple(args.budgets),
+        seeds=tuple(args.seeds),
+        models=tuple(args.models),
+        split_seed=config.split.seed,
+        reduce_validation=args.reduce_validation,
+    )
+    print(plan.summary())
+    plan.write(Path(args.output).with_suffix(".plan.json"))
+
+    if args.dry_run:
+        print("\ndry run: nothing was trained. Remove --dry-run to execute.")
+        return 0
+
+    device = resolve(config.train.device)
+    done: set[str] = set()
+    if Path(args.output).exists():
+        done = {row["model"] for row in read_predictions(args.output)}
+        print(f"\nresuming: {len(done)} cell(s) already have predictions")
+
+    for index, cell in enumerate(plan.cells, start=1):
+        if cell.name in done:
+            print(f"[{index}/{len(plan.cells)}] {cell.name}: already done, skipping")
+            continue
+        print(f"\n[{index}/{len(plan.cells)}] {cell.name}: "
+              f"{len(cell.participants)} training participant(s), device {device}")
+
+        encoder = None
+        if cell.model == "D3":
+            if not args.pretrained_encoder:
+                raise SystemExit("D3 cells need --pretrained-encoder")
+            encoder, source = load_encoder_checkpoint(
+                args.pretrained_encoder,
+                expect_channels=tuple(config.data.channels),
+                expect_preprocessing_id=config.preprocessing_identity,
+                forbid_participants=tuple(split.val) + tuple(split.test),
+            )
+            # The encoder saw the whole training split's signal, which is the
+            # point -- self-supervision does not need labels, so a label budget
+            # does not restrict it. That asymmetry is the hypothesis, and it is
+            # stated here rather than left for a reader to infer.
+            print(f"    encoder: {source.objective}, {len(source.pretrain_participants)} participants")
+
+        cell_config = dataclasses.replace(
+            config, train=dataclasses.replace(config.train, seed=cell.seed)
+        )
+        train, val, test, _ = build_window_datasets(
+            cell_config,
+            split,
+            context=cell_config.model.context_epochs,
+            train_participants=cell.participants,
+            segments=True,
+            centres_per_segment=cell_config.model.centres_per_segment,
+            progress=True,
+        )
+        loader_batch = max(1, cell_config.train.batch_size // cell_config.model.centres_per_segment)
+        _, checkpoint, _ = train_d2(
+            cell_config,
+            split,
+            train,
+            val,
+            encoder=encoder,
+            device=device,
+            checkpoint_path=cell.checkpoint_path(args.runs_dir),
+            run_id=cell.run_id,
+            loader_batch_size=loader_batch,
+        )
+        probabilities = predict(
+            checkpoint_model(checkpoint, cell_config, device), test, device=device
+        )
+        with PredictionWriter(args.output, overwrite=not Path(args.output).exists()) as writer:
+            writer.write(
+                run_id=cell.run_id,
+                model=cell.name,
+                split_id=split.identity,
+                split_part="test",
+                seed=cell.seed,
+                participant_ids=[e.participant_id for e in test.entries],
+                recording_ids=[e.recording_id for e in test.entries],
+                epoch_indices=np.array([e.epoch_index for e in test.entries]),
+                true_labels=test.y,
+                probabilities=probabilities,
+                qc_flags=np.array([e.qc_flags for e in test.entries]),
+            )
+        print(f"    validation participant macro-F1 {checkpoint.val_metric_value:.4f}")
+
+    print(f"\npredictions in {args.output}")
+    print(
+        f"the planned comparison is D3 minus D2 at {PRIMARY_BUDGET:.0%}; compute it "
+        f"with `sleepstatelab report {args.output}` and the benchmark table"
+    )
+    return 0
+
+
+def checkpoint_model(checkpoint: Any, config: Config, device: str) -> Any:
+    """Rebuild the model a checkpoint describes, on the requested device."""
+    from sleepstatelab.training.trainer import build_d2
+
+    model = build_d2(config)
+    model.load_state_dict(checkpoint.state_dict)
+    model.eval()
+    return model.to(device)
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     """Build the report tables from saved predictions."""
     from sleepstatelab.evaluation.metrics import evaluate_predictions
@@ -977,6 +1095,34 @@ def build_parser() -> argparse.ArgumentParser:
     smooth.add_argument("--name", help="model name to save under")
     smooth.add_argument("--append", action="store_true")
     smooth.set_defaults(func=cmd_smooth)
+
+    bench = subparsers.add_parser(
+        "benchmark",
+        help="the label-budget comparison: D3 minus D2 at nested budgets",
+    )
+    common(bench)
+    bench.add_argument("--split", required=True)
+    bench.add_argument("--pretrained-encoder", help="the encoder D3 cells start from")
+    bench.add_argument("--budgets", type=float, nargs="*", default=[0.1, 0.25, 1.0])
+    bench.add_argument("--seeds", type=int, nargs="*", default=[0, 1, 2])
+    bench.add_argument("--models", nargs="*", default=["D2", "D3"])
+    bench.add_argument("--runs-dir", default="runs/benchmark")
+    bench.add_argument("--output", default="outputs/predictions_benchmark.csv")
+    bench.add_argument("--device", default=None)
+    bench.add_argument(
+        "--reduce-validation",
+        action="store_true",
+        help=(
+            "also reduce the validation participants with the budget, which is "
+            "the stricter limited-label setting"
+        ),
+    )
+    bench.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the plan and the participants each budget uses, and stop",
+    )
+    bench.set_defaults(func=cmd_benchmark)
 
     report = subparsers.add_parser("report", help="build tables from saved predictions")
     report.add_argument("predictions")

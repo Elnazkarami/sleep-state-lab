@@ -28,7 +28,7 @@ anywhere else in this document.
 | one-channel training and channel-loss controls | **implemented**, not yet run |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
 | D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data and the pilot |
-| the 10% / 25% / 100% label-budget benchmark | **not run** |
+| the 10% / 25% / 100% label-budget benchmark | **harness implemented**, not run |
 | transition analysis | **not implemented** |
 
 **Executed on real data so far: a six-participant pilot** — four training, one

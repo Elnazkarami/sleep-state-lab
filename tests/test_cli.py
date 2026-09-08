@@ -31,6 +31,7 @@ EXPECTED = {
     "pretrain",
     "predict",
     "smooth",
+    "benchmark",
     "report",
     "smoke",
 }
