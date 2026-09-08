@@ -21,16 +21,18 @@ anywhere else in this document.
 | classical baselines (class prior, logistic regression, random forest) | **implemented**, executed on synthetic and real data |
 | D1 — trainable epoch CNN | **implemented**, executed on synthetic and real data |
 | D2 — temporal transformer over 11 epochs | **implemented**, executed on synthetic and real data |
-| shuffled-neighbour control | **implemented**, executed on real data |
-| context-masking control | **implemented**, executed on real data |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
-| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data; real-data run in progress |
+| **all six required controls** | **implemented**; four run, two not — see below |
+| — shuffled neighbours, masked context | run on real data |
+| — training-fitted temporal smoothing | run on the pilot and the cohort |
+| — pretrained encoder without context, frozen probes | not yet run |
+| — one-channel training, channel loss at inference | not yet run |
+| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data and the pilot |
 | full cohort discovered, audited, epoched, split | **done** — 153 recordings, 78 participants |
 | D1 trained and scored on the cohort | **done** — 15 held-out participants |
-| D2, D3 on the cohort | **not run** |
+| D2, D3 on the cohort | **running** |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
-| the other five required controls | **not run** |
-| transition and single-channel analyses | **not run** |
+| transition analysis | **not implemented** |
 
 **The full cohort is now prepared.** All 153 Sleep Cassette recordings from 78
 participants, every file matching its published PhysioNet checksum, no recording

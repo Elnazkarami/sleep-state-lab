@@ -25,11 +25,11 @@ anywhere else in this document.
 | context-masking control | **implemented**, executed on real data |
 | temporal-smoothing control | **implemented**, executed on real data |
 | pretrained-encoder-without-context, frozen-probe controls | **implemented**, not yet run |
+| one-channel training and channel-loss controls | **implemented**, not yet run |
 | saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
-| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data; real-data run in progress |
+| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data and the pilot |
 | the 10% / 25% / 100% label-budget benchmark | **not run** |
-| the one remaining required control (one-channel models trained as such) | **not implemented** |
-| transition and single-channel analyses | **not run** |
+| transition analysis | **not implemented** |
 
 **Executed on real data so far: a six-participant pilot** — four training, one
 validation, one test — on Sleep Cassette recordings downloaded from PhysioNet
