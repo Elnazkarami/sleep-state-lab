@@ -27,10 +27,10 @@ anywhere else in this document.
 | — training-fitted temporal smoothing | run on the pilot and the cohort |
 | — pretrained encoder without context, frozen probes | not yet run |
 | — one-channel training, channel loss at inference | not yet run |
-| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data and the pilot |
+| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data, the pilot and the cohort |
 | full cohort discovered, audited, epoched, split | **done** — 153 recordings, 78 participants |
 | D1 trained and scored on the cohort | **done** — 15 held-out participants |
-| D2, D3 on the cohort | **running** |
+| D2, D3 on the cohort | **done** — with both context controls |
 | the 10% / 25% / 100% label-budget benchmark | **harness implemented**, not run |
 | transition analysis | **implemented**, run on the cohort |
 | sleep-window sensitivity analysis | **implemented**, prepared and quantified on real data |
@@ -43,11 +43,16 @@ movement time. Wake is 68.8% of the labelled epochs, N2 16.7%, REM 6.2%, N1
 5.2%, N3 3.1%. The cohort split is 47 training / 16 validation / 15 test
 participants (`outputs/split_cohort.json`, identity `2a0313adb97b9da0`).
 
-**D1 has been trained and scored on the cohort**: 47 training, 16 validation,
-15 held-out participants, 81,355 test epochs. D2 and D3 have not — their results
-below are still the six-participant pilot, where the test estimate is one
-person's night. The pilot section says so at every table, and one of its
-findings has already been overturned by the cohort.
+**D1, D2 and D3 have all been trained and scored on the cohort**: 47 training,
+16 validation, 15 held-out participants, 81,355 test epochs, with both context
+controls for each temporal model. The six-participant pilot results are kept
+below, labelled, because two of its findings were overturned by the cohort and
+that is worth being able to see.
+
+**What has not been run is the experiment the repository exists for**: the
+10% / 25% / 100% label-budget comparison. The harness is built and the planned
+comparison — D3 minus D2 at 25% — is declared in code. At full labels, which is
+the only budget run so far, pretraining did not help.
 
 **D1 and D2 have been run at matched compute — on one held-out participant.**
 Sharing encodings between overlapping windows made a D2 pass cost the same as a
