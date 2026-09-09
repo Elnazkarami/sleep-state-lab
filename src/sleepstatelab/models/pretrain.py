@@ -77,16 +77,23 @@ def patch_mask(
         raise ValueError(
             f"cannot mask {n_patches_masked} of {n_patches} patches"
         )
-    scores = torch.rand(batch, n_patches, generator=generator, device=device)
+    # Drawn on the CPU and moved, never drawn on the accelerator. Two reasons,
+    # and the second is the important one. A CPU generator cannot seed a draw on
+    # an MPS device at all -- torch raises -- so a run that worked on a laptop's
+    # CPU died on its GPU. And a mask drawn on the accelerator would differ
+    # between devices for the same seed, which would make a pretraining run
+    # unreproducible anywhere but the machine that produced it. The tensor is
+    # 64 by 31 booleans; moving it costs nothing worth measuring.
+    scores = torch.rand(batch, n_patches, generator=generator, device="cpu")
     chosen = scores.argsort(dim=1)[:, :n_patches_masked]
-    patches = torch.zeros(batch, n_patches, dtype=torch.bool, device=device)
+    patches = torch.zeros(batch, n_patches, dtype=torch.bool)
     patches.scatter_(1, chosen, True)
 
-    mask = torch.zeros(batch, n_samples, dtype=torch.bool, device=device)
+    mask = torch.zeros(batch, n_samples, dtype=torch.bool)
     mask[:, : n_patches * patch_samples] = patches.repeat_interleave(
         patch_samples, dim=1
     )
-    return mask
+    return mask.to(device)
 
 
 class MaskedReconstruction(nn.Module):

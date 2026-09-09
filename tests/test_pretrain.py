@@ -258,3 +258,43 @@ def test_config_carries_the_pretraining_settings():
     other = Config(pretrain=PretrainConfig(mask_ratio=0.75))
     assert other.preprocessing_identity == config.preprocessing_identity
     assert other.identity != config.identity
+
+
+def test_the_mask_is_drawn_on_the_cpu_whatever_the_device():
+    """A CPU generator cannot seed a draw on an accelerator -- torch raises -- so
+    a run that worked on a laptop's CPU died on its GPU partway through a cohort
+    pretraining run. Drawing on the CPU and moving also makes the mask identical
+    across devices for a given seed, without which a pretraining run would be
+    reproducible only on the machine that produced it.
+    """
+    mask = patch_mask(
+        3000, 16, 96, batch=4, generator=torch.Generator().manual_seed(5), device="cpu"
+    )
+    assert mask.device.type == "cpu"
+    assert int(mask.sum()) == 4 * 16 * 96
+
+    again = patch_mask(
+        3000, 16, 96, batch=4, generator=torch.Generator().manual_seed(5), device="cpu"
+    )
+    assert torch.equal(mask, again)
+
+
+@pytest.mark.parametrize("device", ["cpu", "mps", "cuda"])
+def test_the_mask_reaches_the_requested_device(device: str):
+    """Every device this package can reach, exercised on the ones present."""
+    from sleepstatelab.devices import probe
+
+    report = probe()
+    if device == "mps" and not report.mps:
+        pytest.skip("no MPS on this machine")
+    if device == "cuda" and not report.cuda:
+        pytest.skip("no CUDA on this machine")
+
+    generator = torch.Generator().manual_seed(5)
+    mask = patch_mask(3000, 16, 96, batch=4, generator=generator, device=device)
+    assert mask.device.type == device
+
+    on_cpu = patch_mask(
+        3000, 16, 96, batch=4, generator=torch.Generator().manual_seed(5), device="cpu"
+    )
+    assert torch.equal(mask.cpu(), on_cpu), "the same seed must hide the same patches"
