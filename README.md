@@ -33,6 +33,7 @@ anywhere else in this document.
 | D2, D3 on the cohort | **running** |
 | the 10% / 25% / 100% label-budget benchmark | **harness implemented**, not run |
 | transition analysis | **implemented**, run on the cohort |
+| sleep-window sensitivity analysis | **implemented**, prepared and quantified on real data |
 
 **The full cohort is now prepared.** All 153 Sleep Cassette recordings from 78
 participants, every file matching its published PhysioNet checksum, no recording
@@ -262,6 +263,22 @@ change what a number means:
   IQR per channel, frozen, hashed, and recorded in every checkpoint. Per-epoch
   z-scoring is available and is *not* the default: it deletes the absolute
   amplitude that separates N3 from N1.
+
+Run on the same twelve recordings, the primary preparation and the sensitivity
+analysis are barely the same task:
+
+| preparation | eligible epochs | Wake | N1 | N2 | N3 | REM |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| primary (no cropping) | 33,111 | 68.4% | 3.5% | 17.0% | 4.6% | 6.5% |
+| sleep-window + 30 min | 12,501 | 16.2% | 9.3% | 45.1% | 12.1% | 17.2% |
+
+Cropping discards 20,616 of 33,111 epochs and takes wake from 68% to 16%. A
+model scored under the second is being asked a different question from one
+scored under the first, and **accuracy in particular means something else**.
+Every published sleep-staging number depends on which was done, and not every
+paper says. That is why the default here is the uncropped one, why the crop has
+its own configuration file rather than a flag, and why it writes to its own
+epoch cache.
 
 **The audit of one real recording** — checksums, header claims, waveforms and
 spectra for each stage, hypnogram alignment, retained counts and every exclusion

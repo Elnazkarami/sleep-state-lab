@@ -12,6 +12,13 @@ data:
   root: data/sleep-edf
   cache_dir: cache/epochs
   channels: ["EEG Fpz-Cz", "EEG Pz-Oz"]
+  # Pinned like every other experiment's configuration. The epoch cache is keyed
+  # by preprocessing identity, and this file's preprocessing differs from the
+  # primary one -- so it writes to its own directory -- but the participants and
+  # nights an experiment covers still belong in the configuration rather than in
+  # whatever the cache happens to hold.
+  nights: [1, 2]
+  participants: []
 
 preprocess:
   normalization: train_robust_channel
