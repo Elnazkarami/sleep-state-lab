@@ -753,10 +753,10 @@ $ ruff check src tests
 All checks passed!
 
 $ pytest -q
-88 passed in 113.61s
+207 passed
 ```
 
-All 88 tests run on generated signals and require no recordings. What each one
+All 207 tests run on generated signals and require no recordings. What each one
 asserts, and which failure it exists to catch, is tabulated in
 [docs/verification.md](docs/verification.md). The checks the brief calls for,
 and where they live:
@@ -773,6 +773,10 @@ and where they live:
 | D2 masking | passed — gaps and boundaries masked not bridged, absent context provably ignored, present context provably used, centre always real |
 | D1/D2 comparability | passed — identical class counts and weights from a shared helper, one shared training routine |
 | the repository contains its own source | passed — no source file is git-ignored, every subpackage imports |
+| the pretraining leak | passed — changing a hidden value leaves the encoder's input identical element for element, and its embedding unchanged |
+| a gap is not a transition | passed — distance from a stage change never counts across an excluded epoch |
+| label budgets are nested | passed — the 10% participants are a subset of the 25%, which are a subset of the whole |
+| the same seed hides the same patches on every device | passed — the pretraining mask is drawn on the CPU and moved |
 
 ### Synthetic CPU smoke pipeline
 
@@ -843,7 +847,7 @@ src/sleepstatelab/
   training/         epoch dataset, context windows and segments, the shared
                     trainer, self-supervised pretraining, checkpoints
   evaluation/       saved predictions, metrics, generated report tables
-tests/              synthetic, real-data-free, CPU
+tests/              207 tests: synthetic, real-data-free, CPU
 docs/               data audit, model contracts, evaluation, PhysioML reuse
 ```
 
