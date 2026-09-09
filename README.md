@@ -486,55 +486,87 @@ per-participant spread. Full protocol in
 
 ### The cohort: 78 participants, 15 held out
 
-The first result on the whole of Sleep Cassette. D1 trained on 47 participants
-(249,041 epochs), selected on 16 validation participants, scored on 15 who were
-never seen: **81,355 test epochs**.
-
-Trained on Apple MPS, 19 passes at 227–290 s, best validation participant
-macro-F1 0.7090 at pass 13, stopped after six without improvement.
+Every model trained on 47 participants (249,041 epochs), selected on 16, scored
+on 15 who were never seen: **81,355 test epochs**. Trained on Apple MPS.
 
 | model | participant macro-F1 | pooled macro-F1 | balanced acc. | Cohen's kappa | accuracy | epochs | participants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| D2 | 0.722 ± 0.094 | 0.766 | 0.791 | 0.812 | 0.907 | 81355 | 15 |
+| D2-shuffled-context | 0.702 ± 0.093 | 0.747 | 0.767 | 0.797 | 0.900 | 81355 | 15 |
+| D3 | 0.695 ± 0.094 | 0.743 | 0.785 | 0.774 | 0.887 | 81355 | 15 |
+| D3-shuffled-context | 0.683 ± 0.093 | 0.731 | 0.770 | 0.765 | 0.883 | 81355 | 15 |
 | D1 | 0.673 ± 0.097 | 0.715 | 0.757 | 0.750 | 0.874 | 81355 | 15 |
 | D1+smoothing | 0.655 ± 0.104 | 0.700 | 0.772 | 0.710 | 0.851 | 81355 | 15 |
+| D3-context-masked | 0.652 ± 0.102 | 0.691 | 0.720 | 0.742 | 0.871 | 81355 | 15 |
+| D2-context-masked | 0.646 ± 0.106 | 0.686 | 0.696 | 0.760 | 0.883 | 81355 | 15 |
 
-Per-stage, D1:
+**D2 beats D1 by 0.049**, and the controls say the gain is real temporal
+information rather than extra parameters:
 
-| stage | precision | recall | F1 (pooled) | F1 (participant mean) | support | participants |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wake | 0.995 | 0.948 | 0.971 | 0.969 | 56983 | 15 |
-| N1 | 0.271 | 0.620 | 0.377 | 0.378 | 3556 | 15 |
-| N2 | 0.865 | 0.690 | 0.768 | 0.758 | 12477 | 15 |
-| N3 | 0.703 | 0.803 | 0.749 | 0.553 | 2892 | 15 |
-| REM | 0.694 | 0.726 | 0.710 | 0.707 | 5447 | 15 |
+* **masking the context costs D2 0.076** (0.722 → 0.646), which is more than
+  D2's entire advantage over D1. The neighbours are being used.
+* **shuffling the context costs 0.020** (0.722 → 0.702). Order now matters —
+  modestly, and unlike on the pilot, where shuffling cost nothing measurable.
+  With fifteen held-out participants instead of one, the shuffle control finally
+  separates from the intact model.
 
-Three things are worth reading off this that six participants could not show.
+So D2 reads its neighbourhood mostly as an unordered summary and partly as a
+sequence: roughly a quarter of what the context is worth depends on the order it
+arrives in.
 
-**The spread is the result.** Participant macro-F1 runs from 0.524 to 0.831
-across the fifteen. A cohort mean of 0.673 describes nobody in particular, which
-is why the per-participant table is in the generated report and why the primary
-metric averages people rather than epochs.
+**D3 does not beat D2 at full labels: 0.695 against 0.722.** Self-supervised
+pretraining *cost* 0.027 here. That is worth stating plainly, and it is also not
+the experiment the hypothesis is about — this is the 100% label budget, where
+pretraining is expected to help least because supervised training already has
+everything. **The planned comparison is D3 minus D2 at the 25% budget, and it
+has not been run.** The harness exists; the compute does not fit on a laptop
+evening.
 
-**Pooled and participant-averaged diverge, and N3 is where.** N3's pooled F1 is
-0.749 but its participant mean is 0.553 — the pooled figure is carried by the
-participants who had plenty of N3, and the mean counts the ones who had almost
-none, where a handful of epochs decide the score. Both numbers are correct and
-they answer different questions; the README reports both for exactly this
-reason.
+What can be said now: on this cohort, with all 47 training participants
+labelled, masked-reconstruction pretraining of this encoder did not help, and
+its context controls behave like D2's — masking costs it 0.043, shuffling 0.012.
 
-**N1 remains the hard stage**: 0.271 precision at 0.620 recall. Every automatic
-scorer struggles with it, it is 4.4% of the test epochs, and a single-epoch
-model with no EOG has less to go on than a human scorer does.
+#### D2's advantage is entirely away from the boundaries
 
-#### Where the errors are: performance by distance from a stage change
+Grouping the same predictions by distance from a scored stage change answers one
+of the questions this repository was built to ask, and the answer is not the
+expected one.
 
-Stage boundaries are where scoring is hard, for people as well as models. The
-`transitions` command groups saved predictions by how far each epoch is from a
-scored stage change and scores each band separately. Annotations are read **only
-to decide which epochs to report together** — distance never entered training,
-sampling, class weighting or model selection.
+Participant macro-F1 by band:
 
-Cohort D1, 15 held-out participants:
+| distance from a stage change | D1 | D2 | D3 |
+| --- | ---: | ---: | ---: |
+| at a change | 0.490 ± 0.084 | 0.492 ± 0.069 | 0.472 ± 0.075 |
+| 1 epoch away | 0.560 ± 0.109 | 0.633 ± 0.123 | 0.553 ± 0.126 |
+| 2 epochs away | 0.602 ± 0.110 | 0.656 ± 0.122 | 0.593 ± 0.116 |
+| 3-5 epochs away | 0.610 ± 0.128 | 0.686 ± 0.117 | 0.632 ± 0.119 |
+| 6+ epochs away | 0.652 ± 0.113 | 0.715 ± 0.103 | 0.706 ± 0.103 |
+
+**At a stage change, D2 is indistinguishable from D1** — 0.492 against 0.490,
+with overlapping spreads. Every epoch of its advantage is earned one or more
+epochs away from a boundary, and most of it six or more away, where D1 is
+already at 94.4% accuracy.
+
+That is the opposite of the intuition that motivates temporal context. Two and a
+half minutes of surrounding signal does not help decide *where* one stage becomes
+another; it helps confirm what a stage is once you are inside it. A reader
+looking for a model that resolves ambiguous boundaries will not find one here,
+and the transition table is what says so.
+
+This is a fact about these classifiers on this cohort. It is not a claim about
+attractors, bifurcations, or what the brain does at a stage boundary, and this
+repository will not make one.
+
+The `transitions` command produces these tables from the same saved predictions
+as everything else. Annotations are read **only to decide which epochs to report
+together** — distance never entered training, sampling, class weighting or model
+selection, so the table is not circular. A gap is not a transition: two epochs
+either side of an excluded one may carry different stages, and nothing is known
+about what happened between them.
+
+#### How hard a boundary is, in full
+
+Cohort D1, with the epoch counts and accuracies the comparison above omits:
 
 | distance from a stage change | epochs | share | participant macro-F1 | accuracy | participants |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -550,11 +582,7 @@ one**, and the 7.9% of epochs that flank a change carry a wildly
 disproportionate share of the errors. The "no change in the run" band is small
 and odd-looking — high accuracy, low macro-F1 — because a run with no stage
 change at all is usually a long stretch of wake, where only one or two classes
-are present and macro-F1 over five has little to average.
-
-**This is a fact about the classifier, not about sleep.** It says where the
-errors are concentrated. It says nothing about attractors, bifurcations, or
-neural dynamics, and this repository will not use it to.
+are present and a macro average over five has little to average.
 
 #### Why the smoothing control lost: it smooths away real changes
 
