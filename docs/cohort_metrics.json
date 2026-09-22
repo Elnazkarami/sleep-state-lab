@@ -236,6 +236,360 @@
     }
   },
   {
+    "model": "D1-pretrained",
+    "run_id": "cohort_d1_pretrained",
+    "split_id": "2a0313adb97b9da0",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 81355,
+    "n_participants": 15,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.6733438405865662,
+    "participant_macro_f1_sd": 0.10615829347426868,
+    "participant_macro_f1": {
+      "SC400": 0.7925518827293827,
+      "SC403": 0.7766847447505072,
+      "SC407": 0.8419282880824213,
+      "SC425": 0.5882046265982013,
+      "SC428": 0.7517067840139087,
+      "SC429": 0.8039019478455549,
+      "SC430": 0.5950539277900108,
+      "SC431": 0.7393759756910863,
+      "SC434": 0.6304347201040484,
+      "SC443": 0.7246484176098182,
+      "SC455": 0.6598223630454318,
+      "SC459": 0.6227497643675767,
+      "SC461": 0.4984928020408096,
+      "SC473": 0.5387861524674522,
+      "SC476": 0.5358152116622814
+    },
+    "pooled_macro_f1": 0.7117281579608412,
+    "pooled_accuracy": 0.8790240304836826,
+    "balanced_accuracy": 0.7459671291119232,
+    "cohens_kappa": 0.7579980383964903,
+    "per_stage_precision": {
+      "Wake": 0.9930364164186235,
+      "N1": 0.29174364075600395,
+      "N2": 0.8142322097378277,
+      "N3": 0.6618505140316755,
+      "REM": 0.7592332865825152
+    },
+    "per_stage_recall": {
+      "Wake": 0.9484758612217679,
+      "N1": 0.577334083239595,
+      "N2": 0.7840827121904304,
+      "N3": 0.8236514522821576,
+      "REM": 0.5962915366256655
+    },
+    "per_stage_f1": {
+      "Wake": 0.9688151380076793,
+      "N1": 0.3900108133103959,
+      "N2": 0.7931010281553523,
+      "N3": 0.5584781254242657,
+      "REM": 0.6563140980351375
+    },
+    "per_stage_support": {
+      "Wake": 56983,
+      "N1": 3556,
+      "N2": 12477,
+      "N3": 2892,
+      "REM": 5447
+    },
+    "per_stage_participants": {
+      "Wake": 15,
+      "N1": 15,
+      "N2": 15,
+      "N3": 15,
+      "REM": 15
+    },
+    "confusion": [
+      [
+        54047,
+        2590,
+        106,
+        26,
+        214
+      ],
+      [
+        223,
+        2053,
+        806,
+        65,
+        409
+      ],
+      [
+        70,
+        1346,
+        9783,
+        872,
+        406
+      ],
+      [
+        0,
+        23,
+        486,
+        2382,
+        1
+      ],
+      [
+        86,
+        1025,
+        834,
+        254,
+        3248
+      ]
+    ],
+    "qc_flagged_epochs": 21,
+    "qc_coverage": 0.9997418720422838,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  },
+  {
+    "model": "D1-probe-pretrained",
+    "run_id": "cohort_d1_probe_pre",
+    "split_id": "2a0313adb97b9da0",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 81355,
+    "n_participants": 15,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.5367037551673115,
+    "participant_macro_f1_sd": 0.09865868402421166,
+    "participant_macro_f1": {
+      "SC400": 0.6102238346316391,
+      "SC403": 0.6080107903910225,
+      "SC407": 0.6660402999896665,
+      "SC425": 0.3196674860145855,
+      "SC428": 0.5646173152921817,
+      "SC429": 0.6450270121178299,
+      "SC430": 0.5196488784057058,
+      "SC431": 0.6496606378197856,
+      "SC434": 0.4955633020903325,
+      "SC443": 0.5988967385636472,
+      "SC455": 0.5379780041063409,
+      "SC459": 0.5298585937986714,
+      "SC461": 0.4012111133749391,
+      "SC473": 0.3895208284136701,
+      "SC476": 0.5146314924996557
+    },
+    "pooled_macro_f1": 0.566485835560367,
+    "pooled_accuracy": 0.7999631245774691,
+    "balanced_accuracy": 0.6197842544425829,
+    "cohens_kappa": 0.6078536298545635,
+    "per_stage_precision": {
+      "Wake": 0.9767832481057072,
+      "N1": 0.18197217180883243,
+      "N2": 0.7256182421582271,
+      "N3": 0.5119747899159663,
+      "REM": 0.37432957277603107
+    },
+    "per_stage_recall": {
+      "Wake": 0.9184844602776266,
+      "N1": 0.4229471316085489,
+      "N2": 0.543239560791857,
+      "N3": 0.8426694329183956,
+      "REM": 0.37158068661648613
+    },
+    "per_stage_f1": {
+      "Wake": 0.9454085949313593,
+      "N1": 0.24851434969709782,
+      "N2": 0.6180474220569128,
+      "N3": 0.5099982075568281,
+      "REM": 0.36155020159435963
+    },
+    "per_stage_support": {
+      "Wake": 56983,
+      "N1": 3556,
+      "N2": 12477,
+      "N3": 2892,
+      "REM": 5447
+    },
+    "per_stage_participants": {
+      "Wake": 15,
+      "N1": 15,
+      "N2": 15,
+      "N3": 15,
+      "REM": 15
+    },
+    "confusion": [
+      [
+        52338,
+        3205,
+        169,
+        49,
+        1222
+      ],
+      [
+        382,
+        1504,
+        793,
+        60,
+        817
+      ],
+      [
+        572,
+        1777,
+        6778,
+        2030,
+        1320
+      ],
+      [
+        25,
+        29,
+        377,
+        2437,
+        24
+      ],
+      [
+        265,
+        1750,
+        1224,
+        184,
+        2024
+      ]
+    ],
+    "qc_flagged_epochs": 21,
+    "qc_coverage": 0.9997418720422838,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  },
+  {
+    "model": "D1-probe-random",
+    "run_id": "cohort_d1_probe_rand",
+    "split_id": "2a0313adb97b9da0",
+    "split_part": "test",
+    "seed": 0,
+    "n_epochs": 81355,
+    "n_participants": 15,
+    "labels": [
+      "Wake",
+      "N1",
+      "N2",
+      "N3",
+      "REM"
+    ],
+    "participant_macro_f1_mean": 0.2910504259159511,
+    "participant_macro_f1_sd": 0.03979262758791794,
+    "participant_macro_f1": {
+      "SC400": 0.3647630519052467,
+      "SC403": 0.25683452475374946,
+      "SC407": 0.36645825247118474,
+      "SC425": 0.24451035726468265,
+      "SC428": 0.34167613925214513,
+      "SC429": 0.3143841800949007,
+      "SC430": 0.2904631744677739,
+      "SC431": 0.3153501566257245,
+      "SC434": 0.2965196953260906,
+      "SC443": 0.26270158548976336,
+      "SC455": 0.2559530405234062,
+      "SC459": 0.27713464503503976,
+      "SC461": 0.26509605107743445,
+      "SC473": 0.26998239129357826,
+      "SC476": 0.2439291431585458
+    },
+    "pooled_macro_f1": 0.3025611312132807,
+    "pooled_accuracy": 0.5205211726384364,
+    "balanced_accuracy": 0.350303699807328,
+    "cohens_kappa": 0.2127425800386696,
+    "per_stage_precision": {
+      "Wake": 0.8600793274627685,
+      "N1": 0.0773274224192527,
+      "N2": 0.314423973880597,
+      "N3": 0.18098223615464995,
+      "REM": 0.1098559728890144
+    },
+    "per_stage_recall": {
+      "Wake": 0.605057648772441,
+      "N1": 0.343363329583802,
+      "N2": 0.4322353129758756,
+      "N3": 0.2994467496542185,
+      "REM": 0.07141545805030292
+    },
+    "per_stage_f1": {
+      "Wake": 0.7074246181665201,
+      "N1": 0.12383892962569878,
+      "N2": 0.36048216474135436,
+      "N3": 0.17609076797236467,
+      "REM": 0.08741564907381758
+    },
+    "per_stage_support": {
+      "Wake": 56983,
+      "N1": 3556,
+      "N2": 12477,
+      "N3": 2892,
+      "REM": 5447
+    },
+    "per_stage_participants": {
+      "Wake": 15,
+      "N1": 15,
+      "N2": 15,
+      "N3": 15,
+      "REM": 15
+    },
+    "confusion": [
+      [
+        34478,
+        9511,
+        8507,
+        2341,
+        2146
+      ],
+      [
+        868,
+        1221,
+        1044,
+        196,
+        227
+      ],
+      [
+        2427,
+        2973,
+        5393,
+        987,
+        697
+      ],
+      [
+        766,
+        447,
+        731,
+        866,
+        82
+      ],
+      [
+        1548,
+        1638,
+        1477,
+        395,
+        389
+      ]
+    ],
+    "qc_flagged_epochs": 21,
+    "qc_coverage": 0.9997418720422838,
+    "absent_class_rule": "Within a participant, a stage with no true and no predicted epochs is omitted from that participant's macro average; a stage present in either the truth or the predictions scores F1 = 0 when it is missed.",
+    "notes": {
+      "per_stage_f1_is": "mean over participants in which the stage counted",
+      "per_stage_precision_recall_is": "pooled over all epochs"
+    }
+  },
+  {
     "model": "D2",
     "run_id": "cohort-d2",
     "split_id": "2a0313adb97b9da0",

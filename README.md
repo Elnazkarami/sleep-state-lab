@@ -531,6 +531,34 @@ What can be said now: on this cohort, with all 47 training participants
 labelled, masked-reconstruction pretraining of this encoder did not help, and
 its context controls behave like D2's — masking costs it 0.043, shuffling 0.012.
 
+#### What pretraining did and did not buy
+
+Two of the six controls needed the cohort's pretrained encoder, and together
+they say something sharper than either does alone.
+
+| model | participant macro-F1 | Cohen's κ |
+| --- | ---: | ---: |
+| D1, random init, fine-tuned | 0.673 ± 0.097 | 0.750 |
+| D1, pretrained encoder, fine-tuned | 0.673 ± 0.106 | 0.758 |
+| D1, **frozen pretrained** encoder, head only | 0.537 ± 0.099 | 0.608 |
+| D1, **frozen random** encoder, head only | 0.291 ± 0.040 | 0.213 |
+
+**Frozen, the pretrained encoder is worth 0.246 over a random one** — 0.537
+against 0.291, with the same linear head trained on each and neither encoder
+allowed to move. Masked reconstruction genuinely learns a representation of
+sleep EEG; a linear probe on it recovers most of what a fully fine-tuned network
+manages.
+
+**Fine-tuned, that entire advantage vanishes**: 0.673 either way, to three
+decimals. Whatever the pretrained encoder found, forty-seven labelled
+participants of supervised training find it too.
+
+That is the cleanest statement of the position this repository has reached. It
+is also precisely the hypothesis the label-budget benchmark exists to test: the
+pretrained representation is real, and at full supervision it is redundant. The
+question is whether it stops being redundant when the labels run out. **That
+comparison has not been run**, and nothing here should be read as answering it.
+
 #### D2's advantage is entirely away from the boundaries
 
 Grouping the same predictions by distance from a scored stage change answers one
