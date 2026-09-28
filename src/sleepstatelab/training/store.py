@@ -81,7 +81,7 @@ def materialise(
     target.mkdir(parents=True, exist_ok=True)
     path = target / f"epochs-{key}.npy"
 
-    if path.exists():
+    if path.exists() and not path.name.startswith("._"):
         existing = np.load(path, mmap_mode="r")
         if existing.shape == shape and existing.dtype == np.float32:
             if progress:

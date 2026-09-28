@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from sleepstatelab.config import Config
-from sleepstatelab.data.discovery import discover
+from sleepstatelab.data.discovery import discover, is_sidecar
 from sleepstatelab.data.epochs import (
     QC_CLIPPED,
     QC_FLATLINE,
@@ -229,6 +229,8 @@ def load_cached(config: Config, participants: tuple[str, ...] | None = None) -> 
     found: list[EpochedRecording] = []
     skipped = 0
     for path in sorted(target.glob("*.npz")):
+        if is_sidecar(path):
+            continue
         record = EpochedRecording.load(path)
         if wanted is not None and record.participant_id not in wanted:
             continue

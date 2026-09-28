@@ -364,3 +364,44 @@ def test_the_store_location_does_not_change_the_epochs(small_config, tmp_path):
 
     assert np.array_equal(np.asarray(here.x), np.asarray(there.x))
     assert np.array_equal(here.y, there.y)
+
+
+def test_appledouble_sidecars_are_not_mistaken_for_data(small_config, tmp_path):
+    """A volume that cannot store POSIX metadata makes macOS write a `._name`
+    file beside every real one, and they look exactly like data to a glob.
+
+    This is not hypothetical: moving the dataset to an exFAT USB drive put
+    `._SC4001E0-PSG.edf` beside every recording and `._SC400-n1.npz` beside every
+    cache entry. Discovery would have paired the first as a recording, and the
+    cache loader failed on the second with an unpickling error.
+    """
+    import dataclasses
+    from pathlib import Path
+
+    from sleepstatelab.data.discovery import discover, is_sidecar
+    from sleepstatelab.data.prepare import load_cached, prepare
+    from sleepstatelab.synthetic import make_cohort
+
+    assert is_sidecar(Path("._SC4001E0-PSG.edf"))
+    assert not is_sidecar(Path("SC4001E0-PSG.edf"))
+
+    root = tmp_path / "edf"
+    make_cohort(root, n_participants=3, n_epochs=24, seed=21)
+    config = dataclasses.replace(
+        small_config,
+        data=dataclasses.replace(
+            small_config.data, root=str(root), cache_dir=str(tmp_path / "cache")
+        ),
+    )
+    prepare(config, progress=False)
+    expected_recordings = len(discover(root).pairs)
+    expected_cached = len(load_cached(config))
+
+    # Put a sidecar beside every file, as the volume would.
+    for directory in (root, Path(config.data.cache_dir)):
+        for path in sorted(directory.rglob("*")):
+            if path.is_file() and not path.name.startswith("._"):
+                (path.parent / f"._{path.name}").write_bytes(b"\x00\x05\x16\x07")
+
+    assert len(discover(root).pairs) == expected_recordings
+    assert len(load_cached(config)) == expected_cached

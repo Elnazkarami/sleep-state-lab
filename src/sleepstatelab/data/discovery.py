@@ -28,6 +28,19 @@ from pathlib import Path
 NAME = re.compile(r"^SC4(?P<participant>\d{2})(?P<night>\d)(?P<tail>[A-Za-z0-9]{0,2})")
 
 
+def is_sidecar(path: Path) -> bool:
+    """Whether a path is a macOS AppleDouble sidecar rather than a file.
+
+    A volume that cannot store POSIX metadata -- exFAT on a USB drive, say --
+    makes macOS write the metadata into a second file called ``._name`` beside
+    every real one. They look exactly like data to a glob: ``._SC4001E0-PSG.edf``
+    would be discovered as a recording and paired, and ``._SC400-n1.npz`` was
+    picked up by the cache loader and failed to unpickle. They are skipped
+    everywhere this package scans a directory.
+    """
+    return path.name.startswith("._")
+
+
 class DiscoveryError(RuntimeError):
     """Raised when a data root cannot be read as Sleep Cassette."""
 
@@ -91,6 +104,8 @@ def discover(
     # like two files claiming one night.
     candidates = sorted(set(where.rglob("*.edf")) | set(where.rglob("*.EDF")))
     for path in candidates:
+        if is_sidecar(path):
+            continue
         found = NAME.match(path.name)
         if found is None:
             ignored.append(path.name)

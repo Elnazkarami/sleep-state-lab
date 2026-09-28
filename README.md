@@ -179,9 +179,14 @@ where they are read sequentially and rarely. The materialised store (about 10 GB
 for the whole cohort) goes on internal storage, where the random reads are free.
 `store_dir` in the configuration does the same thing permanently.
 
-On exFAT specifically, also run `git config core.filemode false` in the
-checkout: exFAT cannot store the executable bit, so git otherwise reports every
-file in the repository as modified.
+On exFAT specifically, two more things. Run `git config core.filemode false` in
+the checkout — exFAT cannot store the executable bit, so git otherwise reports
+every file in the repository as modified. And be aware that macOS writes an
+AppleDouble sidecar called `._name` beside every file on such a volume: these
+look exactly like data to a directory scan, so `._SC4001E0-PSG.edf` would be
+discovered as a recording. Every place this package scans a directory skips
+them, and a test puts a sidecar beside every file and checks that nothing
+changes.
 ---
 
 ## Run it
