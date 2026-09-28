@@ -39,7 +39,11 @@ from sleepstatelab.data.prepare import load_cached, reject_mask_flags
 from sleepstatelab.data.preprocess import NormalizationStats, bandpass, fit_normalization
 from sleepstatelab.data.splits import Split
 from sleepstatelab.labels import STAGES
-from sleepstatelab.training.dataset import EpochIndexEntry, class_weights_from_counts
+from sleepstatelab.training.dataset import (
+    EpochIndexEntry,
+    class_weights_from_counts,
+    materialised_dir,
+)
 from sleepstatelab.training.store import block_views, materialise, store_key
 
 
@@ -282,7 +286,7 @@ def build_window_datasets(
     )
     bytes_needed = total_epochs * len(config.data.channels) * config.samples_per_epoch * 4
     use_store = store if store is not None else bytes_needed > 2e9
-    store_dir = Path(config.data.cache_dir) / "materialised" if use_store else None
+    store_dir = materialised_dir(config) if use_store else None
 
     def build(records: list[EpochedRecording]) -> Any:
         if segments:

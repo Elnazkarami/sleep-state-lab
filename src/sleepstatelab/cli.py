@@ -37,6 +37,8 @@ def _with_overrides(config: Config, args: argparse.Namespace) -> Config:
         data = dataclasses.replace(data, root=args.data_root)
     if getattr(args, "cache_dir", None):
         data = dataclasses.replace(data, cache_dir=args.cache_dir)
+    if getattr(args, "store_dir", None):
+        data = dataclasses.replace(data, store_dir=args.store_dir)
     if getattr(args, "checksums", None):
         data = dataclasses.replace(data, checksums=args.checksums)
     if getattr(args, "participants", None):
@@ -976,6 +978,14 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--config", help="path to a YAML configuration file")
         sub.add_argument("--data-root", help="override the configured data root")
         sub.add_argument("--cache-dir", help="override the configured epoch cache")
+        sub.add_argument(
+            "--store-dir",
+            help=(
+                "where to materialise epochs for training. Point this at fast "
+                "local storage when the cache is on a slow external volume: it "
+                "is read in shuffled order every pass, and the cache is not"
+            ),
+        )
         sub.add_argument("--participants", nargs="*", help="restrict to these participants")
 
     doctor = subparsers.add_parser("doctor", help="what this machine can run")

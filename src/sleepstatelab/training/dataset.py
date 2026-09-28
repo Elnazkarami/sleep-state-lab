@@ -41,6 +41,12 @@ class EpochIndexEntry:
     qc_flags: int
 
 
+def materialised_dir(config: Config) -> Path:
+    """Where the memory-mapped epochs go: ``data.store_dir`` if set, else the cache."""
+    root = config.data.store_dir or config.data.cache_dir
+    return Path(root) / "materialised"
+
+
 def class_weights_from_counts(counts: np.ndarray, scheme: str) -> np.ndarray:
     """Inverse-frequency loss weights, normalised to a mean of one.
 
@@ -229,7 +235,7 @@ def build_datasets(
     )
     bytes_needed = total_epochs * len(config.data.channels) * config.samples_per_epoch * 4
     use_store = store if store is not None else bytes_needed > 2e9
-    store_dir = Path(config.data.cache_dir) / "materialised" if use_store else None
+    store_dir = materialised_dir(config) if use_store else None
     if use_store and progress:
         print(
             f"materialising epochs to disk: {bytes_needed / 1e9:.1f} GB across "

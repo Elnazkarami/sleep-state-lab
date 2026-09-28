@@ -27,3 +27,10 @@ dist/
 
 # docs/ is committed, including the generated audit figure and the generated
 # result tables: they are the evidence the README points at, and they are small.
+
+# macOS AppleDouble sidecars. An exFAT volume cannot store POSIX metadata, so
+# macOS writes a ._name file beside every file to hold it. They are not source.
+._*
+.DS_Store
+.Spotlight-V100
+.Trashes

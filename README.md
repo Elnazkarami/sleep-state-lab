@@ -155,6 +155,33 @@ redistributed here and nothing in this package downloads it for you. Put the
 choosing and point `--data-root` at it. Fetching PhysioNet's `SHA256SUMS.txt`
 alongside them lets the audit verify each file against its published digest.
 
+
+### Putting the data on a slow external drive
+
+The epoch cache and the recordings can live anywhere, including a USB drive. The
+**materialised store cannot**, or should not: it is read in shuffled order, one
+epoch at a time, for every pass of training. Measured on a USB exFAT volume
+here, a random 24 KB read costs 10–15 ms, which is 40–60 minutes of pure waiting
+per pass over the cohort. The same file on internal storage is served from the
+page cache and costs nothing.
+
+So point them at different places:
+
+```bash
+sleepstatelab train-d2 --config configs/default.yaml \
+    --data-root /Volumes/external/sleep-edf-data \
+    --cache-dir  /Volumes/external/sleep-edf-data/cache \
+    --store-dir  ~/sleepstatelab-store
+```
+
+The recordings (7 GB) and the epoch cache (4.6 GB) stay on the external volume,
+where they are read sequentially and rarely. The materialised store (about 10 GB
+for the whole cohort) goes on internal storage, where the random reads are free.
+`store_dir` in the configuration does the same thing permanently.
+
+On exFAT specifically, also run `git config core.filemode false` in the
+checkout: exFAT cannot store the executable bit, so git otherwise reports every
+file in the repository as modified.
 ---
 
 ## Run it

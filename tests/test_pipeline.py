@@ -310,3 +310,57 @@ def test_the_store_is_reused_rather_than_rewritten(small_config, tmp_path):
     EpochDataset(records, config=small_config, stats=stats, reject_flags=reject, store_dir=store)
     assert sorted(store.glob("epochs-*.npy")) == written
     assert written[0].stat().st_mtime_ns == stamp
+
+
+def test_the_store_can_live_apart_from_the_cache(small_config, tmp_path):
+    """Bulk data and randomly-read data belong on different media.
+
+    The epoch cache is read once per dataset construction, sequentially. The
+    materialised store is read in shuffled order for every pass of training. On
+    a USB exFAT volume a random 24 KB read measured 10-15 ms, which is 40-60
+    minutes of pure waiting per cohort pass; the same file on internal storage
+    costs nothing. So the two directories are configured separately.
+    """
+    import dataclasses
+    from pathlib import Path
+
+    from sleepstatelab.training.dataset import materialised_dir
+
+    assert materialised_dir(small_config) == Path(small_config.data.cache_dir) / "materialised"
+
+    apart = dataclasses.replace(
+        small_config,
+        data=dataclasses.replace(small_config.data, store_dir=str(tmp_path / "fast")),
+    )
+    assert materialised_dir(apart) == tmp_path / "fast" / "materialised"
+    # The cache is untouched by the change: only where epochs are materialised moves.
+    assert apart.data.cache_dir == small_config.data.cache_dir
+
+
+def test_the_store_location_does_not_change_the_epochs(small_config, tmp_path):
+    """Where the file sits must not change a single value in it."""
+    import dataclasses
+
+    import numpy as np
+
+    from sleepstatelab.data.prepare import prepare
+    from sleepstatelab.data.splits import grouped_split
+    from sleepstatelab.training.dataset import build_datasets
+
+    prepare(small_config, progress=False)
+    from sleepstatelab.data.prepare import load_cached
+
+    records = load_cached(small_config)
+    split = grouped_split(
+        sorted({r.participant_id for r in records}), seed=0, name="store"
+    )
+
+    here, _, _, _ = build_datasets(small_config, split, store=True)
+    apart_config = dataclasses.replace(
+        small_config,
+        data=dataclasses.replace(small_config.data, store_dir=str(tmp_path / "elsewhere")),
+    )
+    there, _, _, _ = build_datasets(apart_config, split, store=True)
+
+    assert np.array_equal(np.asarray(here.x), np.asarray(there.x))
+    assert np.array_equal(here.y, there.y)

@@ -42,6 +42,19 @@ class DataConfig:
     different cohort."""
 
     cache_dir: str = "cache/epochs"
+    store_dir: str = ""
+    """Where materialised epochs live. Empty puts them under ``cache_dir``.
+
+    Worth separating, because the two directories are read in completely
+    different ways. The epoch cache is read once per dataset construction,
+    sequentially. The materialised store is read in shuffled order, one epoch at
+    a time, for every pass of training -- and on a USB exFAT drive a random
+    24 KB read measured 10-15 ms here, which would put a single pass over the
+    cohort at 40-60 minutes of pure waiting. The same file on internal storage
+    is read from the page cache and costs nothing.
+
+    So: bulk archival data can live on a slow external volume, and this points
+    the randomly-accessed part at something fast."""
     channels: tuple[str, ...] = DEFAULT_CHANNELS
     sampling_rate_hz: float = 100.0
     epoch_seconds: float = EPOCH_SECONDS

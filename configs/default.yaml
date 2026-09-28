@@ -7,6 +7,7 @@ name: default
 data:
   root: data/sleep-edf            # searched recursively for SC4*-PSG.edf
   cache_dir: cache/epochs         # one subdirectory per preprocessing identity
+  store_dir: ""                   # materialised epochs; empty = under cache_dir
   channels: ["EEG Fpz-Cz", "EEG Pz-Oz"]   # order is part of the model contract
   sampling_rate_hz: 100.0
   epoch_seconds: 30.0
