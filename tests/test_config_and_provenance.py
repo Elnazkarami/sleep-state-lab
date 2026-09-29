@@ -43,6 +43,8 @@ def test_shipped_configs_parse():
 
     root = Path(__file__).resolve().parents[1] / "configs"
     for path in sorted(root.glob("*.yaml")):
+        if path.name.startswith("._"):
+            continue  # a macOS AppleDouble sidecar, not a configuration file
         assert load(path).samples_per_epoch == 3000
 
 

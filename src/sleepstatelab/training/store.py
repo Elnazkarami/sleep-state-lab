@@ -55,12 +55,23 @@ def store_key(
     )
 
 
+def free_bytes(path: Path | str) -> int:
+    """Space left on the filesystem that would hold ``path``."""
+    import shutil
+
+    where = Path(path)
+    while not where.exists() and where != where.parent:
+        where = where.parent
+    return int(shutil.disk_usage(where).free)
+
+
 def materialise(
     blocks: list[np.ndarray],
     *,
     directory: Path | str,
     key: str,
     progress: bool = False,
+    min_free_bytes: int = 2_000_000_000,
 ) -> np.ndarray:
     """Concatenate preprocessed blocks into a memory-mapped array on disk.
 
@@ -71,6 +82,12 @@ def materialise(
     Blocks are written one at a time and released as they go, so the peak memory
     is one recording rather than the whole cohort -- writing into a memmap and
     then concatenating in RAM would defeat the entire point.
+
+    Space is checked before the first byte is written. ``open_memmap`` creates
+    the file at full size immediately, so a disk that fills partway through
+    leaves a file of the right length holding zeros where the epochs should be:
+    it loads, it has the right shape, and it is wrong. Stopping first is the
+    only version of this that fails loudly.
     """
     if not blocks:
         raise ValueError("nothing to materialise")
@@ -92,10 +109,20 @@ def materialise(
         # was asked for, and rewriting is cheaper than reasoning about it.
         path.unlink()
 
+    needed = total * int(np.prod(shape[1:])) * 4
+    free = free_bytes(target)
+    if free < needed + min_free_bytes:
+        raise RuntimeError(
+            f"materialising these epochs needs {needed / 1e9:.1f} GB and "
+            f"{target} has {free / 1e9:.1f} GB free, which would leave less than "
+            f"the {min_free_bytes / 1e9:.1f} GB floor. A half-written store is a "
+            "file that loads and is wrong, so this stops before writing rather "
+            "than during. Free space, or point --store-dir somewhere with room."
+        )
     if progress:
         print(
-            f"  materialising {total} epochs ({total * int(np.prod(shape[1:])) * 4 / 1e9:.1f} GB) "
-            f"to {path}",
+            f"  materialising {total} epochs ({needed / 1e9:.1f} GB) to {path} "
+            f"({free / 1e9:.1f} GB free)",
             flush=True,
         )
     written = np.lib.format.open_memmap(

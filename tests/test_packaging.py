@@ -46,7 +46,13 @@ def test_no_source_file_is_git_ignored():
     on_disk = [
         path.relative_to(ROOT)
         for path in sorted((ROOT / "src").rglob("*.py")) + sorted((ROOT / "tests").rglob("*.py"))
-        if "__pycache__" not in path.parts and ".egg-info" not in str(path)
+        if "__pycache__" not in path.parts
+        and ".egg-info" not in str(path)
+        # On a volume that cannot store POSIX metadata, macOS writes a `._name`
+        # sidecar beside every file. They end in .py and are not source; they
+        # are ignored deliberately, which is exactly what this test would
+        # otherwise report as the bug it exists to catch.
+        and not path.name.startswith("._")
     ]
     assert on_disk, "found no source files at all, which cannot be right"
     ignored = _ignored(on_disk)

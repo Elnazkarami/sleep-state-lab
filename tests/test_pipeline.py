@@ -405,3 +405,33 @@ def test_appledouble_sidecars_are_not_mistaken_for_data(small_config, tmp_path):
 
     assert len(discover(root).pairs) == expected_recordings
     assert len(load_cached(config)) == expected_cached
+
+
+def test_the_store_refuses_to_write_without_room(tmp_path, monkeypatch):
+    """`open_memmap` creates the file at full size immediately, so a disk that
+    fills partway through leaves a file of the right length holding zeros where
+    the epochs should be. It loads, it has the right shape, and it is wrong.
+    Stopping before the first byte is the only version that fails loudly."""
+    import numpy as np
+    import pytest
+
+    from sleepstatelab.training import store as store_module
+
+    blocks = [np.zeros((4, 2, 3000), dtype=np.float32)]
+    monkeypatch.setattr(store_module, "free_bytes", lambda path: int(0.1e9))
+    with pytest.raises(RuntimeError, match="would leave less than"):
+        store_module.materialise(
+            blocks, directory=tmp_path, key="k", min_free_bytes=2_000_000_000
+        )
+    assert not list(tmp_path.glob("epochs-*.npy")), "nothing should have been written"
+
+
+def test_the_store_writes_when_there_is_room(tmp_path):
+    import numpy as np
+
+    from sleepstatelab.training.store import materialise
+
+    blocks = [np.ones((4, 2, 3000), dtype=np.float32)]
+    written = materialise(blocks, directory=tmp_path, key="k", min_free_bytes=0)
+    assert written.shape == (4, 2, 3000)
+    assert np.asarray(written).all()
