@@ -539,18 +539,40 @@ cell, three seeds per model:
 label budget, pretraining *cost* 0.027. The direction flips between plentiful
 labels and a quarter of them, which is what the hypothesis predicted.
 
+**The 10% budget points the same way, more strongly.** D2 0.6137, D3 0.6437, a
+difference of **+0.030** — positive in two seeds of three, with the third a dead
+heat (−0.001). So across the three budgets:
+
+| labelled training participants | D2 | D3 | D3 − D2 |
+| --- | ---: | ---: | ---: |
+| 10% (5 participants) | 0.6137 | 0.6437 | **+0.030** |
+| 25% (12 participants) | 0.6669 | 0.6868 | **+0.020** |
+| 100% (47 participants) | 0.722 | 0.695 | **−0.027** |
+
+*(the 100% row is the cohort run on the earlier numerical stack; the benchmark's
+own 100% cells are still running)*
+
+**The advantage grows as the labels shrink, and reverses when they are
+plentiful.** That is the shape the hypothesis predicted, and it agrees with the
+frozen-probe control: the pretrained representation was always real — worth
+0.246 over a random encoder under a linear probe — and what changes with the
+label budget is whether supervised training can find the same thing for itself.
+
 **That is as far as the evidence goes, and it is not far enough to call a
-result.** The seed-to-seed spread is 0.026 for D3 and 0.023 for D2 — both larger
-than the 0.020 difference between them. The benchmark's own code says what to do
+result.** At every budget the effect is smaller than the seed-to-seed spread. At 25% the
+spread is 0.026 for D3 and 0.023 for D2 against a 0.020 difference; at 10% it is
+worse — D2's three seeds span 0.063, twice the 0.030 effect, which is what five
+training participants buys you. The benchmark's own code says what to do
 with that, in a docstring written before any of it ran: *"with three seeds a
 difference smaller than their range is not a difference anyone should describe
 as one."* Three seeds, one split, fifteen test participants cannot support a
 confidence claim, and the consistent sign across seeds is encouraging rather
 than conclusive.
 
-What would make it one: more seeds, more than one participant split, and the
-10% budget — which is running now and is where the effect should be largest if
-it is real.
+What makes the trend more interesting than any single budget is that it is
+monotonic across all three and agrees with a control run separately. What would
+make it a result: more seeds, more than one participant split, and a stricter
+limited-label setting in which validation shrinks with the budget too.
 
 **Disclosure, repeated because it matters here**: validation labels were *not*
 reduced with the budget. Every cell selected its checkpoint on all 16 validation
