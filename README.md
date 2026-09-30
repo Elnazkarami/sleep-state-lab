@@ -521,6 +521,48 @@ per-participant spread. Full protocol in
 
 ## Results
 
+### The label-budget benchmark — primary comparison
+
+**The declared comparison was D3 minus D2 at the 25% labelled-training-participant
+budget, in mean participant macro-F1.** It was declared in code before the
+benchmark ran. Here it is, on 15 held-out participants and 81,355 test epochs per
+cell, three seeds per model:
+
+| seed | D2 @ 25% | D3 @ 25% | D3 − D2 |
+| --- | ---: | ---: | ---: |
+| 0 | 0.6781 | 0.6993 | +0.0211 |
+| 1 | 0.6549 | 0.6879 | +0.0329 |
+| 2 | 0.6677 | 0.6733 | +0.0056 |
+| **mean** | **0.6669** | **0.6868** | **+0.0199** |
+
+**D3 is ahead in all three seeds, by an average of +0.020.** And at the full
+label budget, pretraining *cost* 0.027. The direction flips between plentiful
+labels and a quarter of them, which is what the hypothesis predicted.
+
+**That is as far as the evidence goes, and it is not far enough to call a
+result.** The seed-to-seed spread is 0.026 for D3 and 0.023 for D2 — both larger
+than the 0.020 difference between them. The benchmark's own code says what to do
+with that, in a docstring written before any of it ran: *"with three seeds a
+difference smaller than their range is not a difference anyone should describe
+as one."* Three seeds, one split, fifteen test participants cannot support a
+confidence claim, and the consistent sign across seeds is encouraging rather
+than conclusive.
+
+What would make it one: more seeds, more than one participant split, and the
+10% budget — which is running now and is where the effect should be largest if
+it is real.
+
+**Disclosure, repeated because it matters here**: validation labels were *not*
+reduced with the budget. Every cell selected its checkpoint on all 16 validation
+participants, which is more supervision than a true 25%-label setting would
+have. `--reduce-validation` runs the stricter version and has not been run.
+
+**Numerical stack**: these cells were computed under numpy 2.5 / scipy 1.18,
+after a macOS upgrade forced the dependency rebuild described in the commit log.
+The cohort results below predate it. The band-pass output shifts slightly
+between the two, so the benchmark's cells are internally consistent with each
+other and not bit-comparable with the cohort section.
+
 ### The cohort: 78 participants, 15 held out
 
 Every model trained on 47 participants (249,041 epochs), selected on 16, scored
