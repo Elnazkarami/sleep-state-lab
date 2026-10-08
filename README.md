@@ -16,24 +16,17 @@ anywhere else in this document.
 
 | | state |
 | --- | --- |
-| package, configuration, CLI, tests | **implemented** |
-| data audit, manifest, epoching, splits | **implemented**, executed on real recordings |
-| classical baselines (class prior, logistic regression, random forest) | **implemented**, executed on synthetic and real data |
-| D1 — trainable epoch CNN | **implemented**, executed on synthetic and real data |
-| D2 — temporal transformer over 11 epochs | **implemented**, executed on synthetic and real data |
-| saved-prediction evaluation and generated report tables | **implemented**, executed on synthetic and real data |
-| **all six required controls** | **implemented**; four run, two not — see below |
-| — shuffled neighbours, masked context | run on real data |
-| — training-fitted temporal smoothing | run on the pilot and the cohort |
-| — pretrained encoder without context, frozen probes | not yet run |
-| — one-channel training, channel loss at inference | not yet run |
-| D3 — masked-reconstruction pretraining, then D2 | **implemented**, executed on synthetic data, the pilot and the cohort |
-| full cohort discovered, audited, epoched, split | **done** — 153 recordings, 78 participants |
-| D1 trained and scored on the cohort | **done** — 15 held-out participants |
-| D2, D3 on the cohort | **done** — with both context controls |
-| the 10% / 25% / 100% label-budget benchmark | **harness implemented**, not run |
-| transition analysis | **implemented**, run on the cohort |
-| sleep-window sensitivity analysis | **implemented**, prepared and quantified on real data |
+| **the question** | *does self-supervised pretraining help sleep staging when labels are scarce?* |
+| **the answer so far** | **partially answered, and underpowered.** Pretraining helps by +0.030 at a 10% label budget and +0.020 at 25%, and by nothing at 100%. The trend is monotonic and matches an independent control. At every budget the effect is smaller than the seed-to-seed spread, so it is a direction, not a measurement. |
+| **built** | the whole pipeline: audit, epoching, splits, three models, six controls, transition analysis, benchmark harness, 209 tests |
+| **run on real data** | all 153 Sleep Cassette recordings, 78 participants. D1, D2, D3 and all six controls on 15 held-out participants. 14 of the benchmark's 18 cells. |
+| **not run** | 4 of 18 benchmark cells (100% budget, seeds 1–2); the stricter setting where validation shrinks with the budget |
+| **why not** | the machine. A 16 GB laptop kernel-panicked twice under the memory load; see [the resource write-up](#what-it-actually-costs-to-run-this). |
+| **run without any data** | `sleepstatelab smoke` — the whole pipeline on generated recordings, on a CPU, in about four minutes |
+
+A longer breakdown of what was built against what was executed is in
+[docs/status.md](docs/status.md). Every number in this README was computed from
+saved per-epoch predictions by `sleepstatelab report`; none was typed in by hand.
 
 **The full cohort is now prepared.** All 153 Sleep Cassette recordings from 78
 participants, every file matching its published PhysioNet checksum, no recording
@@ -90,6 +83,32 @@ is a development set with a recorded history, not an untouched confirmation
 cohort.
 
 ---
+
+## Try it without any data
+
+The whole pipeline runs on generated recordings, on a CPU, with nothing
+downloaded:
+
+```bash
+pip install -e ".[dev,plots]"
+sleepstatelab smoke --out-dir outputs/smoke
+```
+
+It writes real EDF files, reads them back through the same reader the
+recordings use, epochs them with deliberate gaps, splits participant-disjoint,
+fits the three baselines, trains D1, pretrains an encoder by masked
+reconstruction, trains D2 and D3, runs the context controls, saves per-epoch
+predictions and generates the report tables — then checks that D1 can overfit a
+tiny batch, and exits non-zero if it cannot.
+
+**Measured cost: 2 min 12 s wall-clock and 824 MB peak resident memory** on the
+M2 Pro described below, CPU only (`/usr/bin/time -l`, 320 s of user time across
+cores). It needs no GPU, no external drive and no recordings.
+
+Every artefact it writes is labelled synthetic. It is a demonstration that the
+software works end to end, not an experiment: the signals are sine waves with a
+different spectrum per stage, and **no number it prints says anything about
+sleep.**
 
 ## Install
 
@@ -495,6 +514,105 @@ rather than producing a result that looks fine and means nothing.
 
 ---
 
+## Resuming an interrupted run
+
+Training writes a `.state.pt` beside its checkpoint after every pass, holding
+the optimiser, the scheduler, the epoch counter, the best score so far and the
+Python, NumPy and torch RNG states. Re-running the same command continues from
+the last completed pass:
+
+```bash
+sleepstatelab train-d2 --config configs/default.yaml --split outputs/split_cohort.json \
+    --checkpoint runs/cohort_d2/checkpoint.pt      # interrupted at pass 12
+sleepstatelab train-d2 --config configs/default.yaml --split outputs/split_cohort.json \
+    --checkpoint runs/cohort_d2/checkpoint.pt      # resumes at pass 13
+```
+
+The RNG states are the part that is easy to leave out and should not be: without
+them a resumed run sees a different shuffle, which makes it a different
+experiment wearing the same name. State written under a different configuration
+or split is refused rather than loaded, and a clean finish deletes it — so the
+file's presence means "this did not end properly" and its absence means there is
+nothing to resume.
+
+The benchmark resumes at a coarser grain too: it reads its predictions file and
+skips cells that already have rows, so the nightly job continues an unfinished
+sweep and exits in seconds when there is nothing left.
+
+## What it actually costs to run this
+
+"Insufficient compute" is not a useful thing to tell a reader, so here is what
+was measured, on what, and where it stopped.
+
+**The machine.** A 14-inch MacBook Pro, M2 Pro (`Mac14,9`), **16 GB of unified
+memory**, macOS 27. Data on a USB exFAT external drive; the training store on
+internal SSD.
+
+### Measured, not estimated
+
+| | measured |
+| --- | --- |
+| D1 training, CPU | 422 ms per batch of 64 — 6.6 ms an epoch |
+| D1 training, Apple MPS | 17 ms per batch of 64 — **24× faster than CPU** |
+| CPU and MPS agreement | identical predicted labels; max probability difference 7.75e-07 |
+| external drive, sequential read | 82 MB/s |
+| external drive, **random** 24 KB read | **10–15 ms** |
+| D2 pass, window-by-window encoding | 827 s |
+| D2 pass, sharing encodings between overlapping windows | **107 s** — 8.3× fewer encodings |
+| one cohort pass (249,041 epochs), D1 on MPS | ~250 s |
+| one cohort pass, D2/D3 on MPS | ~285 s |
+| one benchmark cell, 10% budget | ~15 min |
+| one benchmark cell, 25% budget | ~45 min |
+| one benchmark cell, 100% budget | ~2 h |
+| whole 18-cell benchmark | ~13 h, of which 11 h is the 100% budget |
+
+The random-read figure is the one that shaped the design. Training reads epochs
+in shuffled order, so a pass over the cohort straight from the external drive
+would have been **40–60 minutes of waiting before any arithmetic**. Hence
+`--store-dir`: the epoch cache and recordings stay on the slow volume, where
+they are read once and sequentially, and the randomly-read store goes on
+internal disk.
+
+### Where it stopped, and why
+
+**Memory.** The benchmark holds the training, validation and test epochs
+memory-mapped at once — about 6 GB, 2 GB and 2 GB — beside PyTorch and the MPS
+backend's wired allocations, on a machine with 16 GB total. Twice, that was too
+much. The kernel panic log is specific:
+
+```
+panic(cpu 9): watchdog timeout: no checkins from watchdogd in 94 seconds
+Compressor Info: 26% of compressed pages limit (OK) and 100% of segments
+limit (BAD) with 29 swapfiles and LOW swap space
+```
+
+The compressor hit its segment limit with swap nearly exhausted, the system
+stalled, and the kernel's own watchdog could not check in for 94 seconds. The
+machine restarted at 00:47 and again at 15:21, both during benchmark runs, each
+time losing the cell in progress — a two-hour cell, because training has no
+within-run resumption.
+
+**Not storage, and not the accelerator.** Both were suspected and both were
+ruled out by measurement. Disk never fell below 13 GB free, and the store now
+refuses to write unless it has room, because `open_memmap` creates the file at
+full size immediately — a disk filling partway through would leave a file of the
+right length holding zeros where the epochs should be, which loads and is wrong.
+MPS worked throughout; the one MPS failure was a code bug, a CPU generator
+seeding a draw on the GPU, not a hardware limit.
+
+**What would fix it.** Not patience — footprint. The run does not need
+validation and test materialised while training; loading them on demand would
+roughly halve peak memory. That is the change to make before putting a 16 GB
+machine under this load again, and it has not been made.
+
+### What this cost in wall-clock time
+
+Roughly 30 hours of compute produced: the cohort preparation (10 min), D1, D2,
+D3 and six controls on 78 participants, and 14 of 18 benchmark cells. The four
+missing cells are about 8 hours more.
+
+---
+
 ## Evaluation
 
 **Primary metric: macro-F1 computed per participant, then averaged equally
@@ -586,6 +704,14 @@ between the two, so the benchmark's cells are internally consistent with each
 other and not bit-comparable with the cohort section.
 
 ### The cohort: 78 participants, 15 held out
+
+![cohort results](docs/results_cohort.png)
+
+*Drawn by `scripts/make_results_figure.py` from `docs/cohort_metrics.json`,
+which `sleepstatelab report` generated from saved per-epoch predictions. All
+three models were trained with the same schedule, stopping rule and class
+weighting, on the same 47 participants, so the comparison is between
+architectures rather than budgets.*
 
 Every model trained on 47 participants (249,041 epochs), selected on 16, scored
 on 15 who were never seen: **81,355 test epochs**. Trained on Apple MPS.
@@ -927,10 +1053,10 @@ $ ruff check src tests
 All checks passed!
 
 $ pytest -q
-207 passed
+216 passed
 ```
 
-All 207 tests run on generated signals and require no recordings. What each one
+All 216 tests run on generated signals and require no recordings. What each one
 asserts, and which failure it exists to catch, is tabulated in
 [docs/verification.md](docs/verification.md). The checks the brief calls for,
 and where they live:
@@ -1021,7 +1147,7 @@ src/sleepstatelab/
   training/         epoch dataset, context windows and segments, the shared
                     trainer, self-supervised pretraining, checkpoints
   evaluation/       saved predictions, metrics, generated report tables
-tests/              207 tests: synthetic, real-data-free, CPU
+tests/              216 tests: synthetic, real-data-free, CPU
 docs/               data audit, model contracts, evaluation, PhysioML reuse
 ```
 

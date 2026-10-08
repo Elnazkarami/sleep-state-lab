@@ -36,6 +36,74 @@ from sleepstatelab.training.checkpoint import CHECKPOINT_FORMAT, Checkpoint, sav
 from sleepstatelab.training.windows import IGNORE_LABEL
 
 
+@dataclass(frozen=True, slots=True)
+class TrainingState:
+    """Everything needed to continue a run that stopped in the middle of it.
+
+    A checkpoint holds the best model, which is what you want at the end and is
+    useless for resuming: it says nothing about where the optimiser had got to,
+    how many passes remained, or which examples the shuffler was about to serve.
+    A kernel panic cost a two-hour cell to exactly that gap.
+
+    Written after every pass and deleted on a clean finish, so its presence
+    means "this run did not end properly" and its absence means there is nothing
+    to resume.
+    """
+
+    epoch: int
+    best_score: float
+    best_epoch: int
+    since_improvement: int
+    model_state: dict[str, Any]
+    best_state: dict[str, Any]
+    optimiser_state: dict[str, Any]
+    scheduler_state: dict[str, Any]
+    history: list[dict[str, float]]
+    config_id: str
+    split_id: str
+    run_id: str
+    torch_rng: Any
+    numpy_rng: Any
+    python_rng: Any
+
+
+def state_path(checkpoint_path: Path | str) -> Path:
+    """Where the resumable state for a checkpoint lives."""
+    return Path(checkpoint_path).with_suffix(".state.pt")
+
+
+def save_state(path: Path | str, state: TrainingState) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Written beside the real file and moved into place, so a crash during the
+    # write cannot leave a half-written state that loads.
+    staging = target.with_suffix(".state.tmp")
+    torch.save(asdict(state), staging)
+    staging.replace(target)
+
+
+def load_state(
+    path: Path | str, *, config_id: str, split_id: str
+) -> TrainingState | None:
+    """The state to resume from, or ``None`` when there is nothing to resume.
+
+    A state written under a different configuration or split is refused rather
+    than loaded: continuing one experiment's run inside another's settings would
+    produce a checkpoint that honestly records settings it was not trained under.
+    """
+    target = Path(path)
+    if not target.exists():
+        return None
+    payload = torch.load(target, map_location="cpu", weights_only=False)
+    if payload.get("config_id") != config_id or payload.get("split_id") != split_id:
+        raise ValueError(
+            f"{target} holds state for configuration {payload.get('config_id')} "
+            f"and split {payload.get('split_id')}, but this run is {config_id} "
+            f"and {split_id}. Delete it to start fresh."
+        )
+    return TrainingState(**payload)
+
+
 def seed_everything(seed: int) -> None:
     """Seed every generator this package draws from."""
     random.seed(seed)
@@ -317,6 +385,7 @@ def train_supervised(
     run_id: str = "run",
     progress: bool = True,
     loader_batch_size: int | None = None,
+    resume: bool = True,
 ) -> tuple[nn.Module, Checkpoint, TrainingHistory]:
     """The supervised loop, shared by every model this repository trains.
 
@@ -360,8 +429,32 @@ def train_supervised(
     best_state: dict[str, Any] | None = None
     best_epoch = -1
     since_improvement = 0
+    first_epoch = 0
 
-    for epoch in range(config.train.epochs):
+    resume_from = state_path(checkpoint_path) if checkpoint_path is not None else None
+    if resume and resume_from is not None:
+        found = load_state(resume_from, config_id=config.identity, split_id=split.identity)
+        if found is not None:
+            model.load_state_dict(found.model_state)
+            optimiser.load_state_dict(found.optimiser_state)
+            scheduler.load_state_dict(found.scheduler_state)
+            torch.set_rng_state(found.torch_rng)
+            np.random.set_state(found.numpy_rng)
+            random.setstate(found.python_rng)
+            history.rows = list(found.history)
+            best_score = found.best_score
+            best_state = found.best_state
+            best_epoch = found.best_epoch
+            since_improvement = found.since_improvement
+            first_epoch = found.epoch + 1
+            if progress:
+                print(
+                    f"  resuming at pass {first_epoch + 1}, best so far "
+                    f"{best_score:.4f} at pass {best_epoch + 1}",
+                    flush=True,
+                )
+
+    for epoch in range(first_epoch, config.train.epochs):
         model.train()
         started = time.time()
         total_loss = 0.0
@@ -406,14 +499,39 @@ def train_supervised(
             since_improvement = 0
         else:
             since_improvement += 1
-            if since_improvement >= config.train.early_stopping_patience:
-                if progress:
-                    print(
-                        f"  stopping: no improvement in "
-                        f"{config.train.early_stopping_patience} epochs",
-                        flush=True,
-                    )
-                break
+
+        if resume_from is not None and best_state is not None:
+            # After every pass, so an interruption costs one pass rather than
+            # the whole run. The RNG states go too: without them a resumed run
+            # sees a different shuffle and is a different experiment.
+            save_state(
+                resume_from,
+                TrainingState(
+                    epoch=epoch,
+                    best_score=best_score,
+                    best_epoch=best_epoch,
+                    since_improvement=since_improvement,
+                    model_state={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
+                    best_state=best_state,
+                    optimiser_state=optimiser.state_dict(),
+                    scheduler_state=scheduler.state_dict(),
+                    history=history.rows,
+                    config_id=config.identity,
+                    split_id=split.identity,
+                    run_id=run_id,
+                    torch_rng=torch.get_rng_state(),
+                    numpy_rng=np.random.get_state(),
+                    python_rng=random.getstate(),
+                ),
+            )
+        if since_improvement >= config.train.early_stopping_patience:
+            if progress:
+                print(
+                    f"  stopping: no improvement in "
+                    f"{config.train.early_stopping_patience} epochs",
+                    flush=True,
+                )
+            break
 
     if best_state is None:
         raise RuntimeError("training produced no checkpoint; did it run zero epochs?")
@@ -465,4 +583,8 @@ def train_supervised(
     )
     if checkpoint_path is not None:
         save_checkpoint(checkpoint_path, checkpoint)
+        # The run finished, so there is nothing to resume. Leaving the state
+        # behind would make a completed run look interrupted.
+        if resume_from is not None:
+            resume_from.unlink(missing_ok=True)
     return model, checkpoint, history
