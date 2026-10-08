@@ -31,6 +31,10 @@ jobs:
         # how a whole package once went unchecked. tests/test_packaging.py now
         # fails if any source file is ignored.
         run: ruff check src tests
+      - name: the README does not contradict the committed evidence
+        # A reviewer found the same defect twice: results updated, the prose
+        # above them not. This catches the mechanical half of it.
+        run: python scripts/check_readme_claims.py
       - name: tests
         run: pytest -q -m "not realdata"
       - name: the pipeline runs end to end without any recordings

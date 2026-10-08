@@ -121,7 +121,7 @@ def draw() -> Path:
     # --- panel 3: distance from a stage change ------------------------------
     axis = figure.add_subplot(grid[0, 2])
     bands = transition_bands()
-    names = ["at a\nchange", "1", "2", "3–5", "6+"]
+    names = ["at a\nchange", "1", "2", "3\u20135", "6+"]  # en dash: a range
     for model, colour in (("D1", MUTED), ("D2", ACCENT), ("D3", WARM)):
         if model in bands:
             axis.plot(range(5), bands[model], marker="o", ms=5, lw=2, color=colour, label=model)

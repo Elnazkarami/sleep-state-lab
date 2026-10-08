@@ -42,10 +42,12 @@ controls for each temporal model. The six-participant pilot results are kept
 below, labelled, because two of its findings were overturned by the cohort and
 that is worth being able to see.
 
-**What has not been run is the experiment the repository exists for**: the
-10% / 25% / 100% label-budget comparison. The harness is built and the planned
-comparison — D3 minus D2 at 25% — is declared in code. At full labels, which is
-the only budget run so far, pretraining did not help.
+**The experiment the repository exists for has been run, and is underpowered**:
+14 of the label-budget benchmark's 18 cells, covering 10% and 25% completely
+and 100% at one seed. The declared comparison — D3 minus D2 at 25% — is
+[reported below](#the-label-budget-benchmark--primary-comparison). What remains
+missing is the 100% budget's other two seeds, a second participant split, and
+the stricter setting where validation shrinks with the budget.
 
 **D1 and D2 have been run at matched compute — on one held-out participant.**
 Sharing encodings between overlapping windows made a D2 pass cost the same as a
@@ -53,8 +55,9 @@ D1 pass, so D2 has now been trained for the same twenty passes under the same
 settings. With one test participant the difference between any two models here
 is still not a measurement, and the README does not treat it as one.
 
-There are no pretrained checkpoints, no benchmark results, and no scientific
-conclusions in this repository.
+There are no pretrained checkpoints in this repository, and no claim that the
+label-efficiency question is settled — only that it now has a direction, three
+seeds wide, from one split.
 
 ---
 
@@ -745,9 +748,9 @@ arrives in.
 pretraining *cost* 0.027 here. That is worth stating plainly, and it is also not
 the experiment the hypothesis is about — this is the 100% label budget, where
 pretraining is expected to help least because supervised training already has
-everything. **The planned comparison is D3 minus D2 at the 25% budget, and it
-has not been run.** The harness exists; the compute does not fit on a laptop
-evening.
+everything. **The planned comparison is D3 minus D2 at the 25% budget**, and it is
+[reported above](#the-label-budget-benchmark--primary-comparison): +0.020,
+positive in all three seeds.
 
 What can be said now: on this cohort, with all 47 training participants
 labelled, masked-reconstruction pretraining of this encoder did not help, and
@@ -778,8 +781,10 @@ participants of supervised training find it too.
 That is the cleanest statement of the position this repository has reached. It
 is also precisely the hypothesis the label-budget benchmark exists to test: the
 pretrained representation is real, and at full supervision it is redundant. The
-question is whether it stops being redundant when the labels run out. **That
-comparison has not been run**, and nothing here should be read as answering it.
+question is whether it stops being redundant when the labels run out. **It
+does**, by +0.020 at a quarter of the labels and +0.030 at a tenth — reported
+in full under [the benchmark](#the-label-budget-benchmark--primary-comparison),
+with the reasons it is a direction rather than a settled quantity.
 
 #### D2's advantage is entirely away from the boundaries
 
@@ -1109,13 +1114,21 @@ experiment and it is not evidence about sleep.
 
 ## What is not claimed
 
-* **No benchmark result exists.** D1, D2 and D3 have each been trained and
-  scored, but on six participants with one in the test set. Four of the six
-  required controls have not been run: a pretrained CNN without temporal
-  context, frozen random versus frozen pretrained probes with the same probe, a
-  D1-plus-temporal-smoothing baseline, and one-channel models trained as such.
-  The 10% / 25% / 100% label-budget comparison — the thing this repository is
-  built to measure — has not been run at all. They are specified in
+* **The label-efficiency result is a direction, not a measurement.** At every
+  budget the D3-minus-D2 difference is smaller than the seed-to-seed spread of
+  either model — 0.020 against spreads of 0.023 and 0.026 at the 25% budget,
+  and 0.030 against a spread of 0.063 at 10%. Three seeds on **one participant
+  split** cannot support a confidence interval, and none is given.
+* **Checkpoint selection used more supervision than the budget implies.** Every
+  cell selected on all 16 validation participants. A true 10%-label setting
+  would not have them; `--reduce-validation` implements that and has not been
+  run.
+* **The 100% budget rests on one seed** in the benchmark (plus a separate cohort
+  run that agrees on the direction). Its other two cells were lost to a machine
+  that could not hold them.
+* **One of the six controls has not been run**: one-channel models trained as
+  such, as distinct from a two-channel model losing a channel at inference. It
+  is implemented and specified in
   [docs/model_contracts.md](docs/model_contracts.md).
 * Nothing here claims sleep stages are attractors, that transitions are
   bifurcations, or that any embedding structure is a mechanism or a clinically
