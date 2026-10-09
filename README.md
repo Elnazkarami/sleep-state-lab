@@ -517,6 +517,20 @@ rather than producing a result that looks fine and means nothing.
 
 ---
 
+## Running it on free cloud compute
+
+The benchmark needs more memory than a 16 GB laptop has — see
+[what it costs](#what-it-actually-costs-to-run-this) for the kernel panic that
+established this. [docs/running_on_kaggle.md](docs/running_on_kaggle.md) is a
+worked setup for Kaggle Notebooks, which give roughly 29 GB of RAM and a GPU
+free: what to upload (the 4.4 GB epoch cache and the pretrained encoder, not the
+recordings), how the three storage areas differ, how to chain sessions past the
+12-hour cap, and which experiments to spend the weekly GPU allowance on.
+
+The short version of that last point: a second participant split and the
+stricter `--reduce-validation` setting are worth more than finishing the
+100%-budget row, whose answer is already established twice.
+
 ## Resuming an interrupted run
 
 Training writes a `.state.pt` beside its checkpoint after every pass, holding
